@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Preview__preview_start",
+      "Bash(uv run:*)",
+      "Bash(chmod +x /Users/harsha/Desktop/Research/cipher/launch-frontend.command)",
+      "Bash(grep -r atm_price /Users/harsha/Desktop/Research/IV:HV/Macro --include=*.py)",
+      "Bash(grep -r ATM_RelativeStrikes /Users/harsha/Desktop/Research/cipher --include=*.py)",
+      "Read(//Users/harsha/Desktop/Research/**)",
+      "Bash(2)",
+      "Bash(find /Users/harsha/Desktop/Research -name *.py -type f -exec grep -l \"Cleaned_.*parquet\\\\|ATM_Relative\" {})",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(brew --prefix)",
+      "Bash(python3 -c \"import json; json.load\\(open\\(''/Users/harsha/Desktop/Research/cipher/.claude/settings.local.json''\\)\\); print\\(''Valid JSON''\\)\")",
+      "Bash(python3 -c \":*)",
+      "Bash(xargs kill:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"\nimport json,sys,re\nd=json.load(sys.stdin)\nti=d.get('tool_input',{})\ntext=' '.join(str(v) for v in ti.values())\npaths=re.findall(r'/Users/[A-Za-z0-9_./ :-]+',text)\nbad=[p for p in paths if not p.startswith('/Users/harsha/Desktop/Research')]\nif bad:\n    print(json.dumps({'stopReason':f'[Data Path Policy] Path {bad[0]!r} is outside /Users/harsha/Desktop/Research/. All data must come from that directory.','continue':False}))\n\"",
+            "timeout": 5,
+            "statusMessage": "Checking data path policy..."
+          }
+        ]
+      }
+    ]
+  }
+}

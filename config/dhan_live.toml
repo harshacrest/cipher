@@ -1,0 +1,8 @@
+[dhan]
+access_token = ""
+client_id = ""
+
+[strategy]
+entry_time = "09:21:00"
+exit_time = "15:00:00"
+num_lots = 1

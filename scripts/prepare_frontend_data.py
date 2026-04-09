@@ -1,6 +1,8 @@
 """
 Pre-process backtest output into JSON files for the frontend.
 Reads xlsx/csv and options parquets, writes static JSON to output/<strategy>/api/.
+
+Supports OTM1 CE + OTM1 PE with separate strikes, per-leg SL, and per-leg exit info.
 """
 
 import json
@@ -56,7 +58,6 @@ def process_performance():
     df = pd.read_excel(xls, "DayOfWeek")
     write_json(df.to_dict("records"), "dow.json")
 
-    # ByDTE may not exist anymore
     if "ByDTE" in xls.sheet_names:
         df = pd.read_excel(xls, "ByDTE")
         write_json(df.to_dict("records"), "dte.json")
@@ -81,7 +82,7 @@ def process_equity():
 
 
 def process_intraday():
-    """Generate per-day intraday JSON with spot + straddle price at locked strike."""
+    """Generate per-day intraday JSON with spot + separate CE/PE prices at their respective strikes."""
     trades = pd.read_excel(OUTPUT_DIR / "trades.xlsx")
 
     available_dates = []
@@ -89,20 +90,33 @@ def process_intraday():
 
     for _, trade in tqdm(trades.iterrows(), total=len(trades), desc="  Intraday JSON"):
         day_str = trade["date"]
-        atm_strike = int(trade["atm_strike"])
+        ce_strike = int(trade["ce_strike"])
+        pe_strike = int(trade["pe_strike"])
 
         try:
             # Load spot
             spot_df = load_spot(day_str)
             spot_df = spot_df.sort_values("datetime").reset_index(drop=True)
 
-            # Load options at the locked-in strike
-            opts = load_options_at_strike(day_str, atm_strike)
-            if opts is None or opts.empty:
-                continue
+            # Load CE options at OTM1 CE strike
+            ce_opts = load_options_at_strike(day_str, ce_strike)
+            pe_opts = load_options_at_strike(day_str, pe_strike)
 
-            # Merge spot and options on datetime
-            merged = spot_df.merge(opts, on="datetime", how="inner")
+            # Build merged dataframe
+            merged = spot_df.copy()
+
+            if ce_opts is not None and not ce_opts.empty:
+                ce_col = ce_opts[["datetime", "ce_ltp"]].rename(columns={"ce_ltp": "ce_price"})
+                merged = merged.merge(ce_col, on="datetime", how="left")
+            else:
+                merged["ce_price"] = None
+
+            if pe_opts is not None and not pe_opts.empty:
+                pe_col = pe_opts[["datetime", "pe_ltp"]].rename(columns={"pe_ltp": "pe_price"})
+                merged = merged.merge(pe_col, on="datetime", how="left")
+            else:
+                merged["pe_price"] = None
+
             merged = merged.sort_values("datetime").reset_index(drop=True)
 
             # Downsample to ~1 per minute
@@ -110,32 +124,67 @@ def process_intraday():
 
             # Ensure entry/exit ticks are included
             merged["time_str"] = merged["datetime"].dt.strftime("%H:%M:%S")
-            entry_rows = merged[merged["time_str"] >= "09:21:00"].head(1)
-            exit_rows = merged[merged["time_str"] >= "15:00:00"].head(1)
-            sampled = pd.concat([sampled, entry_rows, exit_rows]).drop_duplicates(subset=["datetime"]).sort_values("datetime")
+
+            entry_time_raw = trade.get("entry_time")
+            if pd.notna(entry_time_raw):
+                entry_ts = pd.Timestamp(entry_time_raw)
+                entry_hm = entry_ts.strftime("%H:%M:%S")
+                entry_rows = merged[merged["time_str"] >= entry_hm].head(1)
+                sampled = pd.concat([sampled, entry_rows]).drop_duplicates(subset=["datetime"]).sort_values("datetime")
+            else:
+                entry_hm = "09:21:00"
+
+            # Include CE exit time
+            ce_exit_raw = trade.get("ce_exit_time")
+            if pd.notna(ce_exit_raw):
+                ce_exit_ts = pd.Timestamp(ce_exit_raw)
+                ce_exit_hm = ce_exit_ts.strftime("%H:%M:%S")
+                ce_exit_rows = merged[merged["time_str"] >= ce_exit_hm].head(1)
+                sampled = pd.concat([sampled, ce_exit_rows]).drop_duplicates(subset=["datetime"]).sort_values("datetime")
+            else:
+                ce_exit_hm = "15:00:00"
+
+            # Include PE exit time
+            pe_exit_raw = trade.get("pe_exit_time")
+            if pd.notna(pe_exit_raw):
+                pe_exit_ts = pd.Timestamp(pe_exit_raw)
+                pe_exit_hm = pe_exit_ts.strftime("%H:%M:%S")
+                pe_exit_rows = merged[merged["time_str"] >= pe_exit_hm].head(1)
+                sampled = pd.concat([sampled, pe_exit_rows]).drop_duplicates(subset=["datetime"]).sort_values("datetime")
+            else:
+                pe_exit_hm = "15:00:00"
 
             ticks = []
             for _, row in sampled.iterrows():
-                ticks.append({
+                tick = {
                     "time": row["datetime"].strftime("%H:%M"),
                     "spot": round(float(row["spot"]), 2),
-                    "atm_price": round(float(row["straddle_price"]), 2),
-                    "ce_price": round(float(row["ce_ltp"]), 2),
-                    "pe_price": round(float(row["pe_ltp"]), 2),
-                })
+                }
+                tick["ce_price"] = round(float(row["ce_price"]), 2) if pd.notna(row.get("ce_price")) else None
+                tick["pe_price"] = round(float(row["pe_price"]), 2) if pd.notna(row.get("pe_price")) else None
+                ticks.append(tick)
 
-            entry_time = "09:21"
-            exit_time = "15:00"
-            if len(entry_rows) > 0:
-                entry_time = entry_rows.iloc[0]["datetime"].strftime("%H:%M")
-            if len(exit_rows) > 0:
-                exit_time = exit_rows.iloc[0]["datetime"].strftime("%H:%M")
+            # Build per-leg info
+            ce_sl = round(float(trade["ce_sl"]), 2) if pd.notna(trade.get("ce_sl")) else None
+            pe_sl = round(float(trade["pe_sl"]), 2) if pd.notna(trade.get("pe_sl")) else None
 
             day_data = {
                 "ticks": ticks,
-                "entry_time": entry_time,
-                "exit_time": exit_time,
-                "atm_strike": atm_strike,
+                "entry_time": entry_hm[:5],
+                "ce_strike": ce_strike,
+                "pe_strike": pe_strike,
+                "ce_sl": ce_sl,
+                "pe_sl": pe_sl,
+                "entry_ce": round(float(trade["entry_ce"]), 2) if pd.notna(trade.get("entry_ce")) else None,
+                "entry_pe": round(float(trade["entry_pe"]), 2) if pd.notna(trade.get("entry_pe")) else None,
+                "exit_ce": round(float(trade["exit_ce"]), 2) if pd.notna(trade.get("exit_ce")) else None,
+                "exit_pe": round(float(trade["exit_pe"]), 2) if pd.notna(trade.get("exit_pe")) else None,
+                "ce_exit_time": ce_exit_hm[:5],
+                "pe_exit_time": pe_exit_hm[:5],
+                "ce_exit_reason": trade.get("ce_exit_reason", "EOD"),
+                "pe_exit_reason": trade.get("pe_exit_reason", "EOD"),
+                "ce_pnl": round(float(trade["ce_pnl"]), 2) if pd.notna(trade.get("ce_pnl")) else None,
+                "pe_pnl": round(float(trade["pe_pnl"]), 2) if pd.notna(trade.get("pe_pnl")) else None,
                 "pnl": round(float(trade["pnl"]), 2),
             }
 

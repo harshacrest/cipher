@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from functools import lru_cache
 
 from nautilus_trader.cache.cache import Cache
 from nautilus_trader.common.component import LiveClock, MessageBus
@@ -14,18 +13,19 @@ from adapters.dhan.data import DhanDataClient
 from adapters.dhan.execution import DhanExecutionClient
 from adapters.dhan.providers import DhanInstrumentProvider
 
+# Shared provider instance — both data and exec clients use the same one
+_shared_provider: DhanInstrumentProvider | None = None
 
-@lru_cache(maxsize=1)
-def get_cached_dhan_instrument_provider(
-    filters: tuple | None = None,
-) -> DhanInstrumentProvider:
-    """Get or create a shared DhanInstrumentProvider instance."""
-    filter_dict = dict(filters) if filters else None
-    return DhanInstrumentProvider(filters=filter_dict)
+
+def get_shared_provider(filters: dict | None = None) -> DhanInstrumentProvider:
+    """Get or create the shared instrument provider."""
+    global _shared_provider
+    if _shared_provider is None:
+        _shared_provider = DhanInstrumentProvider(filters=filters)
+    return _shared_provider
 
 
 class DhanLiveDataClientFactory(LiveDataClientFactory):
-    """Factory for creating DhanHQ live data clients."""
 
     @staticmethod
     def create(
@@ -36,8 +36,7 @@ class DhanLiveDataClientFactory(LiveDataClientFactory):
         cache: Cache,
         clock: LiveClock,
     ) -> DhanDataClient:
-        filters = tuple(sorted(config.instrument_filters.items())) if config.instrument_filters else None
-        provider = get_cached_dhan_instrument_provider(filters)
+        provider = get_shared_provider(config.instrument_filters)
         return DhanDataClient(
             loop=loop,
             msgbus=msgbus,
@@ -50,7 +49,6 @@ class DhanLiveDataClientFactory(LiveDataClientFactory):
 
 
 class DhanLiveExecClientFactory(LiveExecClientFactory):
-    """Factory for creating DhanHQ live execution clients."""
 
     @staticmethod
     def create(
@@ -61,7 +59,7 @@ class DhanLiveExecClientFactory(LiveExecClientFactory):
         cache: Cache,
         clock: LiveClock,
     ) -> DhanExecutionClient:
-        provider = get_cached_dhan_instrument_provider()
+        provider = get_shared_provider()  # Reuse same instance from data factory
         return DhanExecutionClient(
             loop=loop,
             msgbus=msgbus,

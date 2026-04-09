@@ -71,10 +71,12 @@ class DhanWebSocketClient:
 
     async def connect(self) -> None:
         """Establish WebSocket connection."""
+        print(f"[DhanWS] Connecting...", flush=True)
         self._session = aiohttp.ClientSession()
         self._ws = await self._session.ws_connect(self.url, heartbeat=30)
         self._running = True
         self._read_task = asyncio.create_task(self._read_loop())
+        print("[DhanWS] Connected!", flush=True)
         log.info("DhanHQ WebSocket connected")
 
         # Re-subscribe if reconnecting
@@ -114,6 +116,7 @@ class DhanWebSocketClient:
                     for seg, sid in batch
                 ],
             }
+            print(f"[DhanWS] Subscribe: {msg}", flush=True)
             await self._ws.send_str(json.dumps(msg))
             log.debug("Subscribed to %d instruments", len(batch))
 
@@ -128,9 +131,11 @@ class DhanWebSocketClient:
                 elif msg.type == aiohttp.WSMsgType.PING:
                     await self._ws.pong(msg.data)
                 elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    print(f"[DhanWS] WS closed/error: {msg.type}", flush=True)
                     log.warning("WebSocket closed/error: %s", msg.type)
                     break
             except asyncio.TimeoutError:
+                print("[DhanWS] Read timeout!", flush=True)
                 log.warning("WebSocket read timeout, reconnecting...")
                 break
             except asyncio.CancelledError:
@@ -159,64 +164,24 @@ class DhanWebSocketClient:
             asyncio.create_task(self._reconnect())
 
     def _parse_binary(self, data: bytes) -> None:
-        """Parse DhanHQ v2 binary market data frame."""
-        if len(data) < HEADER_SIZE:
+        """Parse DhanHQ v2 binary market data frame.
+
+        Dhan v2 ticker format (16 bytes):
+          Byte 0: response code (2=ticker, 4=quote)
+          Byte 1: packet length
+          Bytes 2-3: padding
+          Bytes 4-7: security_id (uint32 LE)
+          Bytes 8-11: LTP (float LE)
+          Bytes 12-15: LTT epoch seconds (uint32 LE)
+        """
+        if len(data) < 12:
             return
 
-        # Header: response_code (1 byte), num_packets (1 byte), payload_length (2 bytes),
-        #         exchange_segment (1 byte), padding (1 byte), security_id (2 bytes)
-        # Actual layout varies by feed type. For quote packets:
-        response_code = data[0]
+        security_id = struct.unpack_from("<I", data, 4)[0]
+        ltp = struct.unpack_from("<f", data, 8)[0]
+        ltt = struct.unpack_from("<I", data, 12)[0] if len(data) >= 16 else 0
 
-        offset = 0
-        while offset + HEADER_SIZE <= len(data):
-            # Parse 8-byte header
-            exchange_segment = data[offset + 4]
-            security_id = struct.unpack_from("<I", data, offset + 4)[0] >> 8  # bits 8-31
-
-            # For simplicity, extract from the structured format
-            # Re-parse with known Dhan v2 layout
-            try:
-                self._parse_quote_packet(data, offset)
-            except Exception:
-                pass
-            break  # Single packet per message in most cases
-
-    def _parse_quote_packet(self, data: bytes, offset: int = 0) -> None:
-        """Parse a single quote packet from the binary stream."""
-        if len(data) < HEADER_SIZE + 4:
+        if ltp <= 0:
             return
 
-        # Dhan v2 header: bytes 0-1 = feed type + packet count
-        # bytes 2-3 = data length, bytes 4 = exchange segment
-        # bytes 5-7 = security_id (3 bytes LE, or 4 bytes with segment)
-        # The exact layout depends on Dhan's binary protocol version.
-        # Using the documented structure:
-        exchange_segment = struct.unpack_from("<B", data, 4)[0]
-        security_id = struct.unpack_from("<I", data, 4)[0] >> 8
-
-        if len(data) < HEADER_SIZE + QUOTE_PAYLOAD_SIZE:
-            # Ticker packet (just LTP)
-            if len(data) >= HEADER_SIZE + 8:
-                ltp = struct.unpack_from("<f", data, HEADER_SIZE)[0]
-                self._on_tick(exchange_segment, security_id, ltp, ltp, 1, 1, 0)
-            return
-
-        # Quote packet — extract LTP and bid/ask from volume data
-        ltp = struct.unpack_from("<f", data, HEADER_SIZE)[0]
-        total_sell_qty = struct.unpack_from("<I", data, HEADER_SIZE + 18)[0]
-        total_buy_qty = struct.unpack_from("<I", data, HEADER_SIZE + 22)[0]
-
-        # For options, bid ≈ LTP (Dhan quote doesn't include best bid/ask in this packet)
-        # Full market depth requires a separate "Full" subscription
-        # Use LTP as both bid and ask (same as backtest spot convention)
-        # TODO: Switch to Full feed type for proper bid/ask when available
-        self._on_tick(
-            exchange_segment,
-            security_id,
-            ltp,    # bid
-            ltp,    # ask
-            max(total_buy_qty, 1),
-            max(total_sell_qty, 1),
-            0,
-        )
+        self._on_tick(0, security_id, ltp, ltp, 1, 1, ltt)

@@ -1,8 +1,8 @@
 [dhan]
-access_token = ""
-client_id = ""
+access_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc0Njg2MTI1LCJpYXQiOjE3NzQ1OTk3MjUsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAwMTk3Nzk3In0.VENq8kURnqIaasDWvretZPFvgOyWQTv87CLcxT97CszumPAc5wHcQM7t2fj_-rqvUHG-t-Kgp6NN8Rn3Mxg8Ug"
+client_id = "1100197797"
 
 [strategy]
-entry_time = "09:21:00"
-exit_time = "15:00:00"
+entry_time = "12:08:00"
+exit_time = "23:00:00"
 num_lots = 1

@@ -11,7 +11,7 @@ import pandas as pd
 from nautilus_trader.common.providers import InstrumentProvider
 from nautilus_trader.config import InstrumentProviderConfig
 from nautilus_trader.model.enums import OptionKind
-from nautilus_trader.model.identifiers import InstrumentId
+from nautilus_trader.model.identifiers import InstrumentId, Symbol
 
 from adapters._common.nse import (
     SPOT_ID,
@@ -39,45 +39,63 @@ class DhanInstrumentProvider(InstrumentProvider):
         self._filters = filters or {}
         self.security_id_to_nautilus: dict[int, InstrumentId] = {}
         self.nautilus_to_security_id: dict[InstrumentId, int] = {}
+        self.spot_security_id: int = self._filters.get("spot_security_id", NIFTY_SPOT_SECURITY_ID)
 
     async def load_all_async(self, filters: dict | None = None) -> None:
-        """Load all NIFTY instruments from Dhan's scrip master."""
+        """Load instruments from Dhan's scrip master."""
         effective_filters = filters or self._filters
         underlying = effective_filters.get("underlying", "NIFTY")
         max_expiries = effective_filters.get("max_expiries", 2)
+        exchange = effective_filters.get("exchange", "NSE")
+        lot_size = effective_filters.get("lot_size", 25)
+        multiplier = effective_filters.get("multiplier", 25)
+        price_inc = effective_filters.get("price_increment", "0.05")
+        self.spot_security_id = effective_filters.get("spot_security_id", NIFTY_SPOT_SECURITY_ID)
+
+        from nautilus_trader.model.enums import AssetClass
+        from nautilus_trader.model.identifiers import Venue as V
+        venue = V(exchange)
+        asset_class = AssetClass.COMMODITY if exchange == "MCX" else AssetClass.INDEX
 
         df = self._load_scrip_master()
         df = self._filter_options(df, underlying, max_expiries)
 
         # Build mappings
-        sec_to_naut, naut_to_sec = build_mappings_from_csv(df, underlying)
+        sec_to_naut, naut_to_sec = build_mappings_from_csv(df, underlying, venue=venue)
+        # Add spot mapping
+        spot_sym = f"{underlying}-SPOT"
+        spot_id = InstrumentId(Symbol(spot_sym), venue)
+        sec_to_naut[self.spot_security_id] = spot_id
+        naut_to_sec[spot_id] = self.spot_security_id
         self.security_id_to_nautilus = sec_to_naut
         self.nautilus_to_security_id = naut_to_sec
 
-        # Create and cache NautilusTrader instrument objects
-        # Spot
-        spot = make_spot_instrument()
+        # Create spot instrument
+        spot = make_spot_instrument(underlying=underlying, venue=venue, price_increment=price_inc)
         self.add(spot)
 
-        # Options
+        # Create option instruments
         for _, row in df.iterrows():
             try:
-                strike = int(float(row["SEM_STRIKE_PRICE"]))
-                opt_type = str(row["SEM_OPTION_TYPE"]).strip().upper()
+                strike = int(float(row["STRIKE_PRICE"]))
+                opt_type = str(row["OPTION_TYPE"]).strip().upper()
                 if opt_type not in ("CE", "PE"):
                     continue
 
-                expiry_raw = row["SEM_EXPIRY_DATE"]
+                expiry_raw = row["SM_EXPIRY_DATE"]
                 expiry_dt = pd.Timestamp(expiry_raw)
                 expiry_str = expiry_dt.strftime("%Y%m%d")
                 expiry_date_str = expiry_dt.strftime("%Y-%m-%d")
 
-                # Use trading day as activation (9:15 IST), expiry day 15:30 IST as expiration
                 activation_ns = make_alert_time_ns(expiry_date_str, "09:15:00")
                 expiration_ns = make_alert_time_ns(expiry_date_str, "15:30:00")
 
                 kind = OptionKind.CALL if opt_type == "CE" else OptionKind.PUT
-                inst = make_option_instrument(strike, kind, expiry_str, activation_ns, expiration_ns)
+                inst = make_option_instrument(
+                    strike, kind, expiry_str, activation_ns, expiration_ns,
+                    underlying=underlying, venue=venue, asset_class=asset_class,
+                    lot_size=lot_size, multiplier=multiplier, price_increment=price_inc,
+                )
                 self.add(inst)
             except Exception as e:
                 log.warning("Failed to create instrument from row: %s — %s", row.to_dict(), e)
@@ -95,19 +113,21 @@ class DhanInstrumentProvider(InstrumentProvider):
 
         if cache_path.exists():
             log.info("Loading cached scrip master: %s", cache_path)
-            return pd.read_csv(cache_path)
+            return pd.read_csv(cache_path, low_memory=False)
 
         log.info("Downloading scrip master from %s", DHAN_SCRIP_MASTER_URL)
-        df = pd.read_csv(DHAN_SCRIP_MASTER_URL)
+        df = pd.read_csv(DHAN_SCRIP_MASTER_URL, low_memory=False)
         df.to_csv(cache_path, index=False)
         return df
 
     def _filter_options(self, df: pd.DataFrame, underlying: str, max_expiries: int) -> pd.DataFrame:
-        """Filter to NIFTY OPTIDX on NSE with nearest expiries."""
+        """Filter options for the given underlying across NSE and MCX."""
+        exchange = self._filters.get("exchange", "NSE")
+        instrument_type = "OPTIDX" if exchange == "NSE" else "OPTFUT"
         mask = (
-            (df["SEM_EXM_EXCH_ID"] == "NSE")
-            & (df["SEM_INSTRUMENT_NAME"] == "OPTIDX")
-            & (df["SEM_CUSTOM_SYMBOL"].str.contains(underlying, case=False, na=False))
+            (df["EXCH_ID"] == exchange)
+            & (df["INSTRUMENT"] == instrument_type)
+            & (df["SYMBOL_NAME"] == underlying)
         )
         filtered = df[mask].copy()
 
@@ -115,7 +135,7 @@ class DhanInstrumentProvider(InstrumentProvider):
             return filtered
 
         # Parse expiry dates and keep nearest N expiries
-        filtered["_expiry_dt"] = pd.to_datetime(filtered["SEM_EXPIRY_DATE"], errors="coerce")
+        filtered["_expiry_dt"] = pd.to_datetime(filtered["SM_EXPIRY_DATE"], errors="coerce")
         filtered = filtered.dropna(subset=["_expiry_dt"])
 
         today = pd.Timestamp.now().normalize()

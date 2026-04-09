@@ -12,7 +12,6 @@ import { useFetch } from "@/hooks/use-fetch";
 import type { IntradayData } from "@/types";
 
 function timeToUnix(timeStr: string): UTCTimestamp {
-  // Parse as UTC so chart displays IST times as-is (data is IST labeled as UTC)
   return Math.floor(
     new Date(`2024-01-01T${timeStr}:00Z`).getTime() / 1000
   ) as UTCTimestamp;
@@ -30,7 +29,6 @@ export default function IntradayChart({ date }: { date: string }) {
 
     const container = containerRef.current;
 
-    // Clean up previous chart
     if (chartRef.current) {
       chartRef.current.remove();
       chartRef.current = null;
@@ -38,7 +36,7 @@ export default function IntradayChart({ date }: { date: string }) {
 
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 450,
+      height: 500,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: "#a1a1aa",
@@ -48,14 +46,8 @@ export default function IntradayChart({ date }: { date: string }) {
         vertLines: { visible: false },
         horzLines: { color: "#27272a" },
       },
-      leftPriceScale: {
-        visible: true,
-        borderColor: "#3f3f46",
-      },
-      rightPriceScale: {
-        visible: true,
-        borderColor: "#3f3f46",
-      },
+      leftPriceScale: { visible: true, borderColor: "#3f3f46" },
+      rightPriceScale: { visible: true, borderColor: "#3f3f46" },
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
@@ -67,7 +59,7 @@ export default function IntradayChart({ date }: { date: string }) {
       },
     });
 
-    // Spot price on LEFT axis
+    // ── Spot price (LEFT axis) ──
     const spotSeries = chart.addSeries(LineSeries, {
       priceScaleId: "left",
       color: "#3b82f6",
@@ -76,61 +68,140 @@ export default function IntradayChart({ date }: { date: string }) {
       priceLineVisible: false,
     });
 
-    // ATM straddle price on RIGHT axis
-    const atmSeries = chart.addSeries(LineSeries, {
+    // ── CE price (RIGHT axis) ──
+    const ceSeries = chart.addSeries(LineSeries, {
       priceScaleId: "right",
       color: "#f59e0b",
       lineWidth: 2,
-      title: "ATM Straddle",
+      title: `CE ${data.ce_strike}`,
       priceLineVisible: false,
     });
 
-    const spotData = data.ticks.map((t) => ({
-      time: timeToUnix(t.time),
-      value: t.spot,
-    }));
+    // ── PE price (RIGHT axis) ──
+    const peSeries = chart.addSeries(LineSeries, {
+      priceScaleId: "right",
+      color: "#a855f7",
+      lineWidth: 2,
+      title: `PE ${data.pe_strike}`,
+      priceLineVisible: false,
+    });
 
-    const atmData = data.ticks.map((t) => ({
-      time: timeToUnix(t.time),
-      value: t.atm_price,
-    }));
+    // Deduplicate tick times for flat SL lines
+    const uniqueTimes: UTCTimestamp[] = [];
+    const seenTimes = new Set<number>();
+    for (const t of data.ticks) {
+      const ts = timeToUnix(t.time);
+      if (!seenTimes.has(ts as number)) {
+        seenTimes.add(ts as number);
+        uniqueTimes.push(ts);
+      }
+    }
 
-    spotSeries.setData(spotData);
-    atmSeries.setData(atmData);
+    // ── CE SL line (RIGHT axis, dashed red) ──
+    if (data.ce_sl != null) {
+      const ceSlSeries = chart.addSeries(LineSeries, {
+        priceScaleId: "right",
+        color: "#ef4444",
+        lineWidth: 1,
+        lineStyle: 2,
+        title: `CE SL ${data.ce_sl}`,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      ceSlSeries.setData(
+        uniqueTimes.map((ts) => ({ time: ts, value: data.ce_sl! }))
+      );
+    }
 
-    // Entry/exit markers on ATM series
-    const entryTime = timeToUnix(data.entry_time);
-    const exitTime = timeToUnix(data.exit_time);
+    // ── PE SL line (RIGHT axis, dashed pink) ──
+    if (data.pe_sl != null) {
+      const peSlSeries = chart.addSeries(LineSeries, {
+        priceScaleId: "right",
+        color: "#f87171",
+        lineWidth: 1,
+        lineStyle: 2,
+        title: `PE SL ${data.pe_sl}`,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      peSlSeries.setData(
+        uniqueTimes.map((ts) => ({ time: ts, value: data.pe_sl! }))
+      );
+    }
 
-    // Find ATM prices at entry/exit for marker positioning
-    const entryTick = data.ticks.find((t) => t.time === data.entry_time);
-    const exitTick = data.ticks.find((t) => t.time === data.exit_time);
+    // Set data — deduplicate by time
+    const dedup = <T,>(arr: { time: UTCTimestamp; value: T }[]) => {
+      const seen = new Set<number>();
+      return arr.filter((d) => {
+        if (seen.has(d.time as number)) return false;
+        seen.add(d.time as number);
+        return true;
+      });
+    };
 
-    const markers: Parameters<typeof createSeriesMarkers>[1] = [];
+    spotSeries.setData(
+      dedup(data.ticks.map((t) => ({ time: timeToUnix(t.time), value: t.spot })))
+    );
+    ceSeries.setData(
+      dedup(
+        data.ticks
+          .filter((t) => t.ce_price != null)
+          .map((t) => ({ time: timeToUnix(t.time), value: t.ce_price! }))
+      )
+    );
+    peSeries.setData(
+      dedup(
+        data.ticks
+          .filter((t) => t.pe_price != null)
+          .map((t) => ({ time: timeToUnix(t.time), value: t.pe_price! }))
+      )
+    );
 
-    if (entryTick) {
-      markers.push({
-        time: entryTime,
+    // ── CE entry/exit markers ──
+    const ceMarkers: Parameters<typeof createSeriesMarkers>[1] = [];
+    if (data.entry_time) {
+      ceMarkers.push({
+        time: timeToUnix(data.entry_time),
         position: "aboveBar",
         color: "#22c55e",
         shape: "arrowDown",
-        text: `SELL ${data.entry_time}`,
+        text: `SELL CE ${data.ce_strike}`,
       });
     }
-
-    if (exitTick) {
-      markers.push({
-        time: exitTime,
+    if (data.ce_exit_time) {
+      ceMarkers.push({
+        time: timeToUnix(data.ce_exit_time),
         position: "belowBar",
-        color: "#ef4444",
+        color: data.ce_exit_reason === "SL" ? "#ef4444" : "#f59e0b",
         shape: "arrowUp",
-        text: `EXIT ${data.exit_time}`,
+        text: `CE ${data.ce_exit_reason} ${data.ce_exit_time}`,
       });
     }
+    ceMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+    if (ceMarkers.length > 0) createSeriesMarkers(ceSeries, ceMarkers);
 
-    if (markers.length > 0) {
-      createSeriesMarkers(atmSeries, markers);
+    // ── PE entry/exit markers ──
+    const peMarkers: Parameters<typeof createSeriesMarkers>[1] = [];
+    if (data.entry_time) {
+      peMarkers.push({
+        time: timeToUnix(data.entry_time),
+        position: "aboveBar",
+        color: "#22c55e",
+        shape: "arrowDown",
+        text: `SELL PE ${data.pe_strike}`,
+      });
     }
+    if (data.pe_exit_time) {
+      peMarkers.push({
+        time: timeToUnix(data.pe_exit_time),
+        position: "belowBar",
+        color: data.pe_exit_reason === "SL" ? "#ef4444" : "#f59e0b",
+        shape: "arrowUp",
+        text: `PE ${data.pe_exit_reason} ${data.pe_exit_time}`,
+      });
+    }
+    peMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+    if (peMarkers.length > 0) createSeriesMarkers(peSeries, peMarkers);
 
     chart.timeScale().fitContent();
     chartRef.current = chart;
@@ -151,13 +222,13 @@ export default function IntradayChart({ date }: { date: string }) {
 
   if (loading) {
     return (
-      <div className="animate-pulse h-[450px] bg-zinc-800/50 rounded-lg" />
+      <div className="animate-pulse h-[500px] bg-zinc-800/50 rounded-lg" />
     );
   }
 
   if (error) {
     return (
-      <div className="h-[450px] flex items-center justify-center text-red-400 text-sm bg-zinc-800/50 rounded-lg">
+      <div className="h-[500px] flex items-center justify-center text-red-400 text-sm bg-zinc-800/50 rounded-lg">
         No data for {date}
       </div>
     );
@@ -165,33 +236,76 @@ export default function IntradayChart({ date }: { date: string }) {
 
   return (
     <div>
-      <div className="flex items-center gap-4 mb-2 text-xs text-zinc-500">
+      {/* Legend */}
+      <div className="flex items-center gap-4 mb-2 text-xs text-zinc-500 flex-wrap">
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-3 h-0.5 bg-blue-500 rounded" />
           Spot (LHS)
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-3 h-0.5 bg-amber-500 rounded" />
-          Straddle CE+PE (RHS)
+          CE {data?.ce_strike} (RHS)
         </span>
-        {data?.atm_strike && (
-          <span className="font-mono text-zinc-400">
-            Strike: {data.atm_strike}
-          </span>
-        )}
-        {data?.pnl !== null && data?.pnl !== undefined && (
-          <span
-            className={`ml-auto font-mono font-semibold ${data.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
-          >
-            PnL: {data.pnl >= 0 ? "+" : ""}
-            {data.pnl.toFixed(2)} pts
-          </span>
-        )}
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-3 h-0.5 bg-purple-500 rounded" />
+          PE {data?.pe_strike} (RHS)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-3 h-0.5 bg-red-500 rounded" style={{ borderTop: "1px dashed #ef4444" }} />
+          SL Lines (RHS)
+        </span>
       </div>
+
+      {/* Chart */}
       <div
         ref={containerRef}
         className="w-full rounded-lg border border-zinc-700/50 overflow-hidden"
       />
+
+      {/* Per-leg detail panel */}
+      {data && (
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {/* CE leg */}
+          <div className="flex items-center gap-3 text-xs font-mono px-3 py-2 bg-zinc-800/40 rounded border border-zinc-800">
+            <span className="text-amber-500 font-semibold">CE {data.ce_strike}</span>
+            <span className="text-zinc-500">
+              In: {data.entry_ce?.toFixed(2) ?? "-"} → Out: {data.exit_ce?.toFixed(2) ?? "-"}
+            </span>
+            <span className="text-zinc-500">SL: {data.ce_sl?.toFixed(2) ?? "-"}</span>
+            <span className={data.ce_exit_reason === "SL" ? "text-red-400" : "text-amber-400"}>
+              {data.ce_exit_reason}
+            </span>
+            {data.ce_pnl != null && (
+              <span className={`ml-auto font-semibold ${data.ce_pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {data.ce_pnl >= 0 ? "+" : ""}{data.ce_pnl.toFixed(2)}
+              </span>
+            )}
+          </div>
+          {/* PE leg */}
+          <div className="flex items-center gap-3 text-xs font-mono px-3 py-2 bg-zinc-800/40 rounded border border-zinc-800">
+            <span className="text-purple-500 font-semibold">PE {data.pe_strike}</span>
+            <span className="text-zinc-500">
+              In: {data.entry_pe?.toFixed(2) ?? "-"} → Out: {data.exit_pe?.toFixed(2) ?? "-"}
+            </span>
+            <span className="text-zinc-500">SL: {data.pe_sl?.toFixed(2) ?? "-"}</span>
+            <span className={data.pe_exit_reason === "SL" ? "text-red-400" : "text-amber-400"}>
+              {data.pe_exit_reason}
+            </span>
+            {data.pe_pnl != null && (
+              <span className={`ml-auto font-semibold ${data.pe_pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {data.pe_pnl >= 0 ? "+" : ""}{data.pe_pnl.toFixed(2)}
+              </span>
+            )}
+          </div>
+          {/* Total */}
+          <div className="sm:col-span-2 flex items-center justify-end text-xs font-mono px-3 py-1.5">
+            <span className="text-zinc-500 mr-2">Total PnL:</span>
+            <span className={`font-semibold text-sm ${data.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              {data.pnl >= 0 ? "+" : ""}{data.pnl.toFixed(2)} pts
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

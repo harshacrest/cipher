@@ -48,15 +48,18 @@ export default function TradesTable({ onDateSelect }: TradesTableProps) {
 
   const cols: { key: SortKey; label: string; fmt?: (v: number) => string }[] = [
     { key: "date", label: "Date" },
-    { key: "atm_strike", label: "Strike" },
-    { key: "entry_straddle", label: "Entry", fmt: (v) => v.toFixed(2) },
-    { key: "exit_straddle", label: "Exit", fmt: (v) => v.toFixed(2) },
-    { key: "pnl", label: "PnL", fmt: (v) => v.toFixed(2) },
-    { key: "pnl_pct", label: "PnL %", fmt: (v) => v.toFixed(2) + "%" },
+    { key: "ce_strike", label: "CE Strike" },
+    { key: "pe_strike", label: "PE Strike" },
     { key: "entry_ce", label: "CE In", fmt: (v) => v.toFixed(2) },
+    { key: "exit_ce", label: "CE Out", fmt: (v) => v.toFixed(2) },
+    { key: "ce_exit_reason", label: "CE Exit" },
+    { key: "ce_pnl", label: "CE PnL", fmt: (v) => v.toFixed(2) },
     { key: "entry_pe", label: "PE In", fmt: (v) => v.toFixed(2) },
+    { key: "exit_pe", label: "PE Out", fmt: (v) => v.toFixed(2) },
+    { key: "pe_exit_reason", label: "PE Exit" },
+    { key: "pe_pnl", label: "PE PnL", fmt: (v) => v.toFixed(2) },
+    { key: "pnl", label: "Total PnL", fmt: (v) => v.toFixed(2) },
     { key: "spot_at_entry", label: "Spot In", fmt: (v) => v.toFixed(1) },
-    { key: "spot_at_exit", label: "Spot Out", fmt: (v) => v.toFixed(1) },
   ];
 
   return (
@@ -110,12 +113,14 @@ export default function TradesTable({ onDateSelect }: TradesTableProps) {
                     display = String(raw);
                   }
 
-                  const isPnl = col.key === "pnl" || col.key === "pnl_pct";
-                  const color = isPnl
-                    ? typeof raw === "number" && raw >= 0
-                      ? "text-emerald-400"
-                      : "text-red-400"
-                    : "text-zinc-300";
+                  const isPnl = col.key === "pnl" || col.key === "pnl_pct" || col.key === "ce_pnl" || col.key === "pe_pnl";
+                  const isExit = col.key === "ce_exit_reason" || col.key === "pe_exit_reason";
+                  let color = "text-zinc-300";
+                  if (isPnl) {
+                    color = typeof raw === "number" && raw >= 0 ? "text-emerald-400" : "text-red-400";
+                  } else if (isExit) {
+                    color = raw === "SL" ? "text-red-400" : "text-amber-400";
+                  }
 
                   return (
                     <td key={col.key} className={`px-3 py-1.5 ${color} whitespace-nowrap`}>

@@ -9,12 +9,16 @@ NIFTY_SPOT_SECURITY_ID = 13
 
 
 class ExchangeSegment:
-    """Dhan exchange segment codes for WebSocket and API."""
-    IDX_I = 0       # Index
-    NSE_EQ = 1      # NSE Equity
-    NSE_FNO = 2     # NSE F&O
-    BSE_EQ = 3      # BSE Equity
-    BSE_FNO = 7     # BSE F&O
+    """Dhan exchange segment strings for WebSocket API."""
+    IDX_I = "IDX_I"       # Index
+    NSE_EQ = "NSE_EQ"     # NSE Equity
+    NSE_FNO = "NSE_FNO"   # NSE F&O
+    BSE_EQ = "BSE_EQ"     # BSE Equity
+    BSE_FNO = "BSE_FNO"   # BSE F&O
+    MCX_COMM = "MCX_COMM"  # MCX Commodity
+
+# Crude oil futures nearest month — used as "spot" reference
+CRUDEOIL_FUT_SECURITY_ID = 486502
 
 
 # Dhan WebSocket subscription request types

@@ -1,8 +1,8 @@
-"""Shared NSE instrument definitions for all broker adapters.
+"""Shared instrument definitions for all broker adapters.
 
-This is the single source of truth for how NIFTY instruments are represented
-in NautilusTrader. Both backtest (lib/nautilus_data.py) and live adapters
-must produce instruments matching these specs so the strategy works unchanged.
+This is the single source of truth for how instruments are represented
+in NautilusTrader. Both backtest and live adapters must produce instruments
+matching these specs so the strategy works unchanged.
 """
 
 from nautilus_trader.model.enums import AssetClass, OptionKind
@@ -10,6 +10,7 @@ from nautilus_trader.model.identifiers import InstrumentId, Symbol, Venue
 from nautilus_trader.model.instruments import IndexInstrument, OptionContract
 from nautilus_trader.model.objects import Currency, Price, Quantity
 
+# --- NSE NIFTY defaults ---
 VENUE = Venue("NSE")
 INR = Currency.from_str("INR")
 SPOT_ID = InstrumentId(Symbol("NIFTY-SPOT"), VENUE)
@@ -21,15 +22,25 @@ SIZE_INCREMENT = Quantity.from_int(1)
 LOT_SIZE = Quantity.from_int(25)
 MULTIPLIER = Quantity.from_int(25)
 
+# --- MCX defaults ---
+MCX_VENUE = Venue("MCX")
 
-def make_spot_instrument() -> IndexInstrument:
-    """Create the NIFTY spot index instrument."""
+
+def make_spot_instrument(
+    underlying: str = "NIFTY",
+    venue: Venue | None = None,
+    price_increment: str = "0.05",
+) -> IndexInstrument:
+    """Create a spot/futures reference instrument."""
+    v = venue or VENUE
+    spot_sym = f"{underlying}-SPOT"
+    spot_id = InstrumentId(Symbol(spot_sym), v)
     return IndexInstrument(
-        instrument_id=SPOT_ID,
-        raw_symbol=Symbol("NIFTY-SPOT"),
+        instrument_id=spot_id,
+        raw_symbol=Symbol(spot_sym),
         currency=INR,
         price_precision=PRICE_PREC,
-        price_increment=PRICE_INCREMENT,
+        price_increment=Price.from_str(price_increment),
         size_precision=SIZE_PREC,
         size_increment=SIZE_INCREMENT,
         ts_event=0,
@@ -40,7 +51,7 @@ def make_spot_instrument() -> IndexInstrument:
 def build_option_symbol(underlying: str, strike: int, kind_str: str, expiry_str: str) -> str:
     """Build NautilusTrader symbol string for an option.
 
-    Returns e.g. "NIFTY-22500-CE-20250326"
+    Returns e.g. "NIFTY-22500-CE-20250326" or "CRUDEOIL-5500-CE-20260416"
     """
     return f"{underlying}-{strike}-{kind_str}-{expiry_str}"
 
@@ -51,28 +62,27 @@ def make_option_instrument(
     expiry_str: str,
     activation_ns: int,
     expiration_ns: int,
+    underlying: str = "NIFTY",
+    venue: Venue | None = None,
+    asset_class: AssetClass = AssetClass.INDEX,
+    lot_size: int = 25,
+    multiplier: int = 25,
+    price_increment: str = "0.05",
 ) -> OptionContract:
-    """Create a NIFTY option instrument.
-
-    Args:
-        strike: Strike price (e.g. 22500)
-        option_kind: OptionKind.CALL or OptionKind.PUT
-        expiry_str: Expiry date as YYYYMMDD string
-        activation_ns: UTC nanosecond timestamp for contract activation
-        expiration_ns: UTC nanosecond timestamp for contract expiration
-    """
+    """Create an option instrument for any underlying."""
+    v = venue or VENUE
     kind_str = "CE" if option_kind == OptionKind.CALL else "PE"
-    sym = build_option_symbol("NIFTY", strike, kind_str, expiry_str)
+    sym = build_option_symbol(underlying, strike, kind_str, expiry_str)
     return OptionContract(
-        instrument_id=InstrumentId(Symbol(sym), VENUE),
+        instrument_id=InstrumentId(Symbol(sym), v),
         raw_symbol=Symbol(sym),
-        asset_class=AssetClass.INDEX,
+        asset_class=asset_class,
         currency=INR,
         price_precision=PRICE_PREC,
-        price_increment=PRICE_INCREMENT,
-        multiplier=MULTIPLIER,
-        lot_size=LOT_SIZE,
-        underlying="NIFTY",
+        price_increment=Price.from_str(price_increment),
+        multiplier=Quantity.from_int(multiplier),
+        lot_size=Quantity.from_int(lot_size),
+        underlying=underlying,
         option_kind=option_kind,
         strike_price=Price.from_str(f"{strike}.00"),
         activation_ns=activation_ns,

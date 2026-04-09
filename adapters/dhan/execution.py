@@ -25,9 +25,11 @@ from nautilus_trader.model.identifiers import (
     ClientId,
     InstrumentId,
     TradeId,
+    Venue,
     VenueOrderId,
 )
-from nautilus_trader.model.objects import Currency, Money, Price, Quantity
+from nautilus_trader.model.events import AccountState
+from nautilus_trader.model.objects import Currency, Money, Price, Quantity, AccountBalance, MarginBalance
 
 from adapters._common.nse import INR, VENUE
 from adapters.dhan.config import DhanExecClientConfig
@@ -53,7 +55,7 @@ class DhanExecutionClient(LiveExecutionClient):
         super().__init__(
             loop=loop,
             client_id=ClientId(name),
-            venue=VENUE,
+            venue=Venue("MCX") if "MCX" in config.order_exchange_segment else VENUE,
             oms_type=OmsType.HEDGING,
             account_type=AccountType.MARGIN,
             base_currency=INR,
@@ -70,7 +72,7 @@ class DhanExecutionClient(LiveExecutionClient):
     async def _connect(self) -> None:
         """Connect to DhanHQ execution API."""
         try:
-            from dhanhq import DhanHQ
+            from dhanhq import dhanhq as DhanHQ
         except ImportError:
             raise ImportError("dhanhq package required: pip install dhanhq")
 
@@ -78,7 +80,23 @@ class DhanExecutionClient(LiveExecutionClient):
             client_id=self._config.get_client_id(),
             access_token=self._config.get_access_token(),
         )
-        log.info("DhanHQ execution client connected (client_id=%s)", self._config.get_client_id())
+
+        # Set account_id and generate initial AccountState
+        account_id = AccountId(f"DHAN-{self._config.get_client_id()}")
+        self._set_account_id(account_id)
+        self.generate_account_state(
+            balances=[
+                AccountBalance(
+                    total=Money(1_000_000, INR),
+                    locked=Money(0, INR),
+                    free=Money(1_000_000, INR),
+                ),
+            ],
+            margins=[],
+            reported=True,
+            ts_event=self._clock.timestamp_ns(),
+        )
+        log.info("DhanHQ execution client connected (client_id=%s, account=%s)", self._config.get_client_id(), account_id)
 
     async def _disconnect(self) -> None:
         """Disconnect from DhanHQ."""
@@ -101,7 +119,9 @@ class DhanExecutionClient(LiveExecutionClient):
         )
 
         sec_id = self._provider.nautilus_to_security_id.get(instrument_id)
+        print(f"[ExecClient] Submit order: {instrument_id} -> secId={sec_id}, mappings={len(self._provider.nautilus_to_security_id)}", flush=True)
         if sec_id is None:
+            print(f"[ExecClient] FAILED: No secId for {instrument_id}. Available: {list(self._provider.nautilus_to_security_id.keys())[:5]}", flush=True)
             log.error("No Dhan security ID for %s", instrument_id)
             self.generate_order_rejected(
                 strategy_id=order.strategy_id,
@@ -118,7 +138,7 @@ class DhanExecutionClient(LiveExecutionClient):
         try:
             response = self._dhan.place_order(
                 security_id=str(sec_id),
-                exchange_segment="NSE_FNO",
+                exchange_segment=self._config.order_exchange_segment,
                 transaction_type=transaction_type,
                 quantity=int(order.quantity),
                 order_type="MARKET",
@@ -126,6 +146,7 @@ class DhanExecutionClient(LiveExecutionClient):
                 price=0,
             )
         except Exception as e:
+            print(f"[ExecClient] Order placement exception: {e}", flush=True)
             log.error("Order placement failed: %s", e)
             self.generate_order_rejected(
                 strategy_id=order.strategy_id,

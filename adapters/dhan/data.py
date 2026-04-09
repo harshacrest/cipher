@@ -11,7 +11,7 @@ from nautilus_trader.common.component import LiveClock, MessageBus
 from nautilus_trader.core.datetime import nanos_to_secs
 from nautilus_trader.live.data_client import LiveMarketDataClient
 from nautilus_trader.model.data import QuoteTick
-from nautilus_trader.model.identifiers import ClientId, InstrumentId
+from nautilus_trader.model.identifiers import ClientId, InstrumentId, Venue
 from nautilus_trader.model.objects import Price, Quantity
 
 from adapters._common.nse import VENUE, PRICE_PREC, SIZE_PREC
@@ -39,7 +39,7 @@ class DhanDataClient(LiveMarketDataClient):
         super().__init__(
             loop=loop,
             client_id=ClientId(name),
-            venue=VENUE,
+            venue=Venue(config.exchange) if config.exchange != "NSE" else VENUE,
             msgbus=msgbus,
             cache=cache,
             clock=clock,
@@ -84,13 +84,14 @@ class DhanDataClient(LiveMarketDataClient):
             log.error("No Dhan security ID for %s", instrument_id)
             return
 
-        # Determine exchange segment
-        if sec_id == NIFTY_SPOT_SECURITY_ID:
-            segment = ExchangeSegment.IDX_I
+        # Determine exchange segment from config
+        spot_sec_id = self._provider.spot_security_id
+        if sec_id == spot_sec_id:
+            segment = self._config.spot_ws_segment
         else:
-            segment = ExchangeSegment.NSE_FNO
+            segment = self._config.options_ws_segment
 
-        log.info("Subscribing to ticks: %s (secId=%d, seg=%d)", instrument_id, sec_id, segment)
+        log.info("Subscribing to ticks: %s (secId=%d, seg=%s)", instrument_id, sec_id, segment)
         await self._ws.subscribe([(segment, sec_id)])
 
     async def _unsubscribe_quote_ticks(self, command) -> None:

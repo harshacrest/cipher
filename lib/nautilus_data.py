@@ -222,6 +222,81 @@ def load_option_ticks(
     return list(instruments.values()), all_ticks
 
 
+def load_options_for_strikes(
+    date_str: str,
+    strikes: list[tuple[int, str]],
+) -> tuple[list[OptionContract], list[QuoteTick]]:
+    """Load option ticks for specific (strike, option_type) pairs only."""
+    path = get_nearest_expiry_file(date_str)
+    if path is None:
+        return [], []
+
+    expiry_str = path.stem.split("_")[1]
+    expiry_date = f"{expiry_str[:4]}-{expiry_str[4:6]}-{expiry_str[6:8]}"
+    expiration_ns = make_alert_time_ns(expiry_date, "15:30:00")
+    activation_ns = make_alert_time_ns(date_str, "09:15:00")
+
+    df = pd.read_parquet(path, columns=[
+        "datetime", "option_type", "strike_price", "ltp", "buy_price", "sell_price",
+        "buy_qty", "sell_qty",
+    ])
+
+    if df["option_type"].dtype == object:
+        df["option_type"] = df["option_type"].apply(
+            lambda x: x.decode() if isinstance(x, bytes) else x
+        )
+
+    # Filter to only requested (strike, type) pairs
+    mask = pd.Series(False, index=df.index)
+    for strike, opt_type in strikes:
+        mask = mask | ((df["strike_price"] == strike) & (df["option_type"] == opt_type))
+    df = df[mask]
+
+    if df.empty:
+        return [], []
+
+    df = df.sort_values("datetime").reset_index(drop=True)
+    df = df.drop_duplicates(subset=["datetime", "strike_price", "option_type"], keep="first")
+    df = df.reset_index(drop=True)
+
+    bid = df["buy_price"].values.astype(np.float64)
+    ask = df["sell_price"].values.astype(np.float64)
+    ltp = df["ltp"].values.astype(np.float64)
+
+    bad_bid = (bid <= 0) | np.isnan(bid)
+    bad_ask = (ask <= 0) | np.isnan(ask)
+    bid[bad_bid] = ltp[bad_bid]
+    ask[bad_ask] = ltp[bad_ask]
+
+    swapped = ask < bid
+    bid[swapped], ask[swapped] = ask[swapped].copy(), bid[swapped].copy()
+
+    valid = (bid > 0) & (ask > 0) & ~np.isnan(bid) & ~np.isnan(ask)
+    df = df[valid].reset_index(drop=True)
+    bid = bid[valid]
+    ask = ask[valid]
+
+    bid_qty = np.maximum(df["buy_qty"].values.astype(np.uint64), 1)
+    ask_qty = np.maximum(df["sell_qty"].values.astype(np.uint64), 1)
+    ts_arr = _ist_to_utc_ns(df["datetime"])
+
+    instruments: dict[str, OptionContract] = {}
+    all_ticks: list[QuoteTick] = []
+
+    for (strike, opt_type), group in df.groupby(["strike_price", "option_type"]):
+        kind = OptionKind.CALL if opt_type == "CE" else OptionKind.PUT
+        inst = make_option_instrument(int(strike), kind, expiry_str, activation_ns, expiration_ns)
+        instruments[str(inst.id)] = inst
+
+        idx = group.index.values
+        ticks = _build_ticks_batch(
+            inst.id, bid[idx], ask[idx], bid_qty[idx], ask_qty[idx], ts_arr[idx],
+        )
+        all_ticks.extend(ticks)
+
+    return list(instruments.values()), all_ticks
+
+
 def load_day_data(
     date_str: str,
     entry_time: str = "09:21:00",

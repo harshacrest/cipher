@@ -14,7 +14,11 @@
       "Bash(brew --prefix)",
       "Bash(python3 -c \"import json; json.load\\(open\\(''/Users/harsha/Desktop/Research/cipher/.claude/settings.local.json''\\)\\); print\\(''Valid JSON''\\)\")",
       "Bash(python3 -c \":*)",
-      "Bash(xargs kill:*)"
+      "Bash(xargs kill:*)",
+      "Bash(BACKTEST_START=2025-12-01 BACKTEST_END=2026-01-31 .venv/bin/python backtest/runner_vwap_sd_straddles.py)",
+      "Bash(.venv/bin/python scripts/prepare_vwap_sd_straddles_data.py)",
+      "Bash(.venv/bin/python scripts/prepare_vwap_sd_charts.py)",
+      "Bash(.venv/bin/python -c \":*)"
     ]
   },
   "hooks": {

@@ -1,18 +1,20 @@
 """
-Day High OTM Sell Strategy — NautilusTrader
---------------------------------------------
+Day High OTM Sell Strategy v3 — NautilusTrader
+-----------------------------------------------
 After 09:15 IST on a 3-min timeframe, CE and PE are tracked INDEPENDENTLY:
 
 For each leg (CE / PE):
   1. Determine current OTM1 strike based on spot (rolling dynamic).
-  2. Track that option's day high price on 3-min bar closes.
-  3. When option price falls 5% from its own day high AND 3-min bar closes below → SHORT.
-  4. Stop-loss: option price rises 5% above its day high at signal time → EXIT that leg.
-  5. After exit, RESET: pick fresh OTM1 strike, start tracking new day high.
-  6. At 15:15 IST: close any remaining open legs.
+  2. Track that option's day high using BAR CLOSE (not bar high — avoids wick noise).
+  3. When a new day high forms, LOCK IT — entry only allowed from the NEXT bar onwards.
+  4. On a subsequent bar, if bar_close crosses below pullback_level → SHORT.
+  5. Stop-loss: 5% above the day_high at signal time (original logic — preserves theta runway).
+  6. NO trailing SL — the edge IS holding to EOD for full theta decay.
+  7. Cooldown: after SL exit, skip cooldown_bars bars before allowing re-entry.
+  8. At 15:15 IST: close any remaining open legs.
 
-CE and PE operate completely independently — different entry times, different exits,
-different strikes on re-entry. Multiple trades per leg per day are possible.
+v3 keeps: close-based DH, maturity lock, cooldown after SL.
+v3 reverts: SL back to day_high-anchored (not entry-anchored), no trailing SL.
 """
 
 from __future__ import annotations
@@ -32,9 +34,10 @@ class DayHighOTMSellConfig(StrategyConfig):
     exit_time: str = "15:15:00"
     bar_interval_minutes: int = 3
     pullback_pct: float = 5.0
-    sl_pct_above_high: float = 5.0
+    sl_pct_above_high: float = 5.0       # SL as % above DAY HIGH (original)
+    cooldown_bars: int = 5                # bars to skip after SL exit (5 bars = 15 min)
     strike_step: int = 50
-    lot_size: int = 25
+    lot_size: int = 1
     num_lots: int = 1
     underlying: str = "NIFTY"
     venue: str = "NSE"
@@ -45,20 +48,23 @@ class _LegState:
     """Tracks one independent leg (CE or PE)."""
 
     def __init__(self, side: str):
-        self.side = side  # "CE" or "PE"
+        self.side = side
 
-        # Current monitoring state
+        # Monitoring state
         self.strike: int | None = None
         self.instrument_id: InstrumentId | None = None
-        self.day_high: float = 0.0        # day high of THIS option's price
-        self.signal_day_high: float = 0.0  # day high when signal fired
-        self.pullback_level: float = 0.0   # entry trigger level
-        self.sl_level: float = 0.0         # stop-loss level
+        self.day_high: float = 0.0
+        self.signal_day_high: float = 0.0
+        self.pullback_level: float = 0.0
+        self.sl_level: float = 0.0
 
-        # Bar building for this option
+        # Day high maturity
+        self.bars_since_dh_update: int = 0
+        self.dh_locked: bool = False
+
+        # Bar building
         self.bar_high: float = 0.0
         self.bar_close: float = 0.0
-        self.bar_start_ns: int = 0
         self.bar_tick_count: int = 0
 
         # Position state
@@ -66,7 +72,10 @@ class _LegState:
         self.pending_exit: bool = False
         self.latest_px: float = 0.0
 
-        # Fill tracking for current trade
+        # Cooldown
+        self.cooldown_remaining: int = 0
+
+        # Fill tracking
         self.entry_px: float | None = None
         self.exit_px: float | None = None
         self.entry_time: str | None = None
@@ -80,16 +89,16 @@ class _LegState:
         self.spot_at_exit: float = 0.0
 
     def reset_monitoring(self):
-        """Reset after exit for fresh OTM1 tracking."""
         self.strike = None
         self.instrument_id = None
         self.day_high = 0.0
         self.signal_day_high = 0.0
         self.pullback_level = 0.0
         self.sl_level = 0.0
+        self.bars_since_dh_update = 0
+        self.dh_locked = False
         self.bar_high = 0.0
         self.bar_close = 0.0
-        self.bar_start_ns = 0
         self.bar_tick_count = 0
         self.is_entered = False
         self.pending_exit = False
@@ -111,6 +120,7 @@ class DayHighOTMSell(Strategy):
         self.bar_interval = config.bar_interval_minutes
         self.pullback_pct = config.pullback_pct
         self.sl_pct = config.sl_pct_above_high
+        self.cooldown_bars = config.cooldown_bars
         self.strike_step = config.strike_step
         self.lot_size = config.lot_size
         self.num_lots = config.num_lots
@@ -120,26 +130,20 @@ class DayHighOTMSell(Strategy):
         self.latest_spot: float = 0.0
         self.expiry_str: str | None = None
 
-        # Independent leg states
         self.ce = _LegState("CE")
         self.pe = _LegState("PE")
 
-        # All completed trades for the day
         self._trades: list[dict] = []
-
         self._date_str: str = ""
         self._trading_started: bool = False
         self._eod_triggered: bool = False
         self._bar_interval_ns: int = self.bar_interval * 60 * 1_000_000_000
-
-        # Spot bar tracking (for knowing when 3-min intervals pass)
         self._spot_bar_start_ns: int = 0
         self._spot_bar_count: int = 0
 
     def on_start(self) -> None:
         self.subscribe_quote_ticks(self.spot_id)
 
-        # Discover expiry
         for inst in self.cache.instruments(venue=Venue(self.venue_str)):
             sym = str(inst.id.symbol)
             if sym.startswith(f"{self.underlying}-") and sym != f"{self.underlying}-SPOT":
@@ -161,77 +165,60 @@ class DayHighOTMSell(Strategy):
 
     def _on_trading_start(self, event) -> None:
         self._trading_started = True
-        self.log.info("Trading session started — monitoring CE and PE independently")
 
     def _get_otm_strike(self, side: str) -> int:
-        """Get current OTM1 strike for the given side."""
         atm = int(round(self.latest_spot / self.strike_step) * self.strike_step)
-        if side == "CE":
-            return atm + self.strike_step
-        else:
-            return atm - self.strike_step
+        return atm + self.strike_step if side == "CE" else atm - self.strike_step
 
     def _resolve_instrument(self, strike: int, side: str) -> InstrumentId:
         sym = f"{self.underlying}-{strike}-{side}-{self.expiry_str}"
         return InstrumentId(Symbol(sym), Venue(self.venue_str))
 
     def _ensure_leg_subscribed(self, leg: _LegState) -> bool:
-        """Ensure the leg is monitoring the correct OTM1 strike. Returns True if valid."""
         current_strike = self._get_otm_strike(leg.side)
-
         if leg.strike == current_strike and leg.instrument_id is not None:
-            return True  # Already tracking the right strike
+            return True
 
-        # Strike changed — update subscription
         new_id = self._resolve_instrument(current_strike, leg.side)
         if self.cache.instrument(new_id) is None:
-            return False  # Instrument not available
+            return False
 
         leg.strike = current_strike
         leg.instrument_id = new_id
-        # Reset day high when strike changes (new option = new price series)
         leg.day_high = 0.0
         leg.signal_day_high = 0.0
         leg.pullback_level = 0.0
+        leg.bars_since_dh_update = 0
+        leg.dh_locked = False
         leg.bar_tick_count = 0
-
         self.subscribe_quote_ticks(new_id)
         return True
 
     def on_quote_tick(self, tick) -> None:
-        # Spot tick — track spot and drive 3-min bar timing
         if tick.instrument_id == self.spot_id:
             self.latest_spot = float(tick.bid_price)
-
             if not self._trading_started:
                 return
 
             ts_ns = tick.ts_event
-
-            # Initialize spot bar timing
             if self._spot_bar_count == 0:
                 self._spot_bar_start_ns = ts_ns
                 self._spot_bar_count = 1
                 return
 
             self._spot_bar_count += 1
-
-            # Check 3-min bar completion
-            elapsed = ts_ns - self._spot_bar_start_ns
-            if elapsed >= self._bar_interval_ns:
+            if ts_ns - self._spot_bar_start_ns >= self._bar_interval_ns:
                 self._on_3min_bar_close()
                 self._spot_bar_start_ns = ts_ns
                 self._spot_bar_count = 1
-
             return
 
-        # Option tick — update leg prices and check SL
+        # Option tick
         for leg in (self.ce, self.pe):
             if leg.instrument_id and tick.instrument_id == leg.instrument_id:
-                px = float(tick.ask_price)  # ask = cost to buy back short
+                px = float(tick.ask_price)
                 leg.latest_px = px
 
-                # Update bar tracking for this leg
                 if leg.bar_tick_count == 0:
                     leg.bar_high = px
                     leg.bar_close = px
@@ -240,73 +227,69 @@ class DayHighOTMSell(Strategy):
                     leg.bar_close = px
                 leg.bar_tick_count += 1
 
-                # Check SL on every tick if entered
+                # SL check (no trailing — just static SL)
                 if leg.is_entered and not leg.pending_exit:
                     if leg.sl_level > 0 and px >= leg.sl_level:
-                        self.log.info(
-                            f"{leg.side} SL triggered: px={px:.2f} >= sl={leg.sl_level:.2f}"
-                        )
                         self._close_leg(leg, "SL")
                 break
 
     def _on_3min_bar_close(self) -> None:
-        """Called when a 3-min bar completes. Process each leg independently."""
         if self._eod_triggered:
             return
 
         for leg in (self.ce, self.pe):
             if leg.is_entered or leg.pending_exit:
-                # Reset bar for next interval but don't look for entries
                 leg.bar_high = 0.0
                 leg.bar_close = 0.0
                 leg.bar_tick_count = 0
                 continue
 
-            # Ensure we're tracking the right OTM1 strike
+            # Cooldown after SL
+            if leg.cooldown_remaining > 0:
+                leg.cooldown_remaining -= 1
+                leg.bar_high = 0.0
+                leg.bar_close = 0.0
+                leg.bar_tick_count = 0
+                continue
+
             if not self._ensure_leg_subscribed(leg):
                 leg.bar_tick_count = 0
                 continue
 
             if leg.bar_tick_count == 0:
-                continue  # No option ticks received yet
+                continue
 
             bar_close = leg.bar_close
-            prev_high = leg.day_high
 
-            # Update day high from bar high
-            if leg.bar_high > leg.day_high:
-                leg.day_high = leg.bar_high
+            # FIX 1: Day high from BAR CLOSE (not bar_high)
+            if bar_close > leg.day_high:
+                leg.day_high = bar_close
+                leg.bars_since_dh_update = 0
+                leg.dh_locked = False
 
-            # New day high formed?
-            if leg.day_high > prev_high and prev_high > 0:
                 leg.signal_day_high = leg.day_high
                 leg.pullback_level = leg.day_high * (1 - self.pullback_pct / 100)
+                # SL anchored to day high (original logic — preserves theta runway)
                 leg.sl_level = leg.day_high * (1 + self.sl_pct / 100)
-                self.log.info(
-                    f"{leg.side} {leg.strike}: new day high={leg.day_high:.2f}, "
-                    f"pullback={leg.pullback_level:.2f}, SL={leg.sl_level:.2f}"
-                )
+            else:
+                leg.bars_since_dh_update += 1
 
-            # Check pullback entry
-            if leg.pullback_level > 0 and bar_close <= leg.pullback_level:
-                self.log.info(
-                    f"{leg.side} ENTRY SIGNAL: bar_close={bar_close:.2f} <= "
-                    f"pullback={leg.pullback_level:.2f} (day_high={leg.signal_day_high:.2f})"
-                )
+                # FIX 2: Lock day high after 1 bar of no update
+                if not leg.dh_locked and leg.bars_since_dh_update >= 1 and leg.signal_day_high > 0:
+                    leg.dh_locked = True
+
+            # FIX 3: Only allow entry on FRESH crossover below pullback, AFTER DH is locked
+            if leg.dh_locked and leg.pullback_level > 0 and bar_close <= leg.pullback_level:
                 self._enter_leg(leg)
 
-            # Reset bar for next interval
             leg.bar_high = 0.0
             leg.bar_close = 0.0
             leg.bar_tick_count = 0
 
     def _enter_leg(self, leg: _LegState) -> None:
-        """Enter a single leg."""
         if leg.is_entered or leg.instrument_id is None:
             return
-
         if self.cache.instrument(leg.instrument_id) is None:
-            self.log.warning(f"{leg.side} instrument {leg.instrument_id} not found")
             return
 
         qty = Quantity.from_int(self.lot_size * self.num_lots)
@@ -328,13 +311,7 @@ class DayHighOTMSell(Strategy):
         ist_dt = utc_dt.tz_convert("Asia/Kolkata")
         leg.entry_time = ist_dt.strftime("%H:%M:%S")
 
-        self.log.info(
-            f"ENTERED {leg.side} {leg.strike} at spot={self.latest_spot:.2f}, "
-            f"time={leg.entry_time}"
-        )
-
     def _close_leg(self, leg: _LegState, reason: str) -> None:
-        """Close a single leg."""
         leg.pending_exit = True
         leg.exit_reason = reason
         leg.spot_at_exit = self.latest_spot
@@ -348,10 +325,6 @@ class DayHighOTMSell(Strategy):
             if pos.instrument_id == leg.instrument_id:
                 self.close_position(pos)
                 break
-
-        self.log.info(
-            f"EXIT {leg.side} ({reason}): time={leg.exit_time}"
-        )
 
     def _on_exit(self, event) -> None:
         self._eod_triggered = True
@@ -374,10 +347,9 @@ class DayHighOTMSell(Strategy):
                 break
 
     def _finalize_leg(self, leg: _LegState) -> None:
-        """Record completed trade for one leg and reset for re-entry."""
         entry_px = leg.entry_px or 0.0
         exit_px = leg.exit_px or 0.0
-        pnl = entry_px - exit_px  # sold first
+        pnl = entry_px - exit_px
 
         trade = {
             "date": self._date_str,
@@ -398,14 +370,12 @@ class DayHighOTMSell(Strategy):
             "pnl_pct": round((pnl / entry_px) * 100, 2) if entry_px > 0 else 0,
         }
         self._trades.append(trade)
-        self.log.info(
-            f"Trade #{trade['trade_num']} {leg.side} {leg.entry_strike} finalized: "
-            f"PnL={pnl:.2f} ({leg.exit_reason})"
-        )
 
-        # Reset leg for potential re-entry with fresh OTM1 strike
+        was_sl = leg.exit_reason == "SL"
+        cooldown = self.cooldown_bars if was_sl else 0
+
         leg.reset_monitoring()
+        leg.cooldown_remaining = cooldown
 
     def get_daily_results(self, date_str: str) -> list[dict]:
-        """Extract ALL trade results for the day. Called by runner."""
         return self._trades

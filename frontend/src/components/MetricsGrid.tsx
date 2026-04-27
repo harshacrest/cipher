@@ -1,112 +1,133 @@
 "use client";
 
+import { useMemo } from "react";
 import { useFetch } from "@/hooks/use-fetch";
 import type { Metric } from "@/types";
 
-const GROUPS: Record<string, string[]> = {
-  Performance: [
-    "Total PnL (pts)",
-    "Annualized Return (pts)",
-    "Profit Factor",
-    "Expectancy (pts)",
-  ],
-  "Trade Stats": [
-    "Total Trades",
-    "Winners",
-    "Losers",
-    "Flat",
-    "Win Rate (%)",
-  ],
-  Risk: [
-    "Max Drawdown (pts)",
-    "Max DD Duration (days)",
-    "Sharpe Ratio (ann.)",
-    "Sortino Ratio (ann.)",
-    "Calmar Ratio",
-  ],
-  Distribution: [
-    "Avg PnL (pts)",
-    "Avg Win (pts)",
-    "Avg Loss (pts)",
-    "Max Win (pts)",
-    "Max Loss (pts)",
-    "Risk-Reward Ratio",
-    "Std Dev (daily)",
-    "Skewness",
-    "Kurtosis",
-  ],
-  "Streaks & Monthly": [
-    "Max Win Streak",
-    "Max Loss Streak",
-    "Best Month (pts)",
-    "Worst Month (pts)",
-    "Profitable Months (%)",
-  ],
-};
+/**
+ * KPI strip — modelled 1:1 on the Research Framework's `<Kpi>` pattern:
+ * a single flat grid with `auto-fit minmax(150px, 1fr)` columns, 1 px hairline
+ * gap on a rule-colored background, uppercase micro-labels, mono values,
+ * positive → green, negative → red, neutral → ink.
+ *
+ * No group titles or section dividers — Research Framework presents everything
+ * as one continuous strip so the eye can scan without the header noise.
+ */
 
-function formatValue(v: number | string): string {
+interface KpiSpec {
+  /** Key as written in cipher's metrics.json */
+  key: string;
+  /** Display label (kept short like Research Framework) */
+  label: string;
+  digits?: number;
+  suffix?: string;
+  /** Prepend `+` for positive values (used for returns-like metrics) */
+  signed?: boolean;
+  /** Force semantic color */
+  color?: "pos" | "neg" | "neutral";
+}
+
+/* All 28 metrics from metrics.json, ordered like Research Framework:
+     returns/consistency first, then risk/distribution, then streaks.
+     Single flat strip — no group headers. */
+const ITEMS: KpiSpec[] = [
+  // Returns & consistency
+  { key: "Total PnL (pts)",          label: "Total PnL",      digits: 1, suffix: " pts", signed: true },
+  { key: "Annualized Return (pts)",  label: "Ann. Return",    digits: 1, suffix: " pts", signed: true },
+  { key: "Expectancy (pts)",         label: "Expectancy",     digits: 2, suffix: " pts", signed: true },
+  { key: "Avg PnL (pts)",            label: "Avg PnL",        digits: 2, suffix: " pts", signed: true },
+  { key: "Profit Factor",            label: "Profit Factor",  digits: 2, color: "neutral" },
+  { key: "Sharpe Ratio (ann.)",      label: "Sharpe",         digits: 2, color: "neutral" },
+  { key: "Sortino Ratio (ann.)",     label: "Sortino",        digits: 2, color: "neutral" },
+  { key: "Calmar Ratio",             label: "Calmar",         digits: 2, color: "neutral" },
+  { key: "Win Rate (%)",             label: "Win Day %",      digits: 1, suffix: "%",    color: "neutral" },
+  { key: "Profitable Months (%)",    label: "Win Month %",    digits: 1, suffix: "%",    color: "neutral" },
+  { key: "Risk-Reward Ratio",        label: "R:R",            digits: 2, color: "neutral" },
+
+  // Trade counts
+  { key: "Total Trades",             label: "Trades",         digits: 0, color: "neutral" },
+  { key: "Winners",                  label: "Winners",        digits: 0, color: "neutral" },
+  { key: "Losers",                   label: "Losers",         digits: 0, color: "neutral" },
+  { key: "Flat",                     label: "Flat",           digits: 0, color: "neutral" },
+
+  // Risk & drawdown
+  { key: "Max Drawdown (pts)",       label: "Max DD",         digits: 2, suffix: " pts", color: "neg" },
+  { key: "Max DD Duration (days)",   label: "Max DD Days",    digits: 0, suffix: "d",    color: "neutral" },
+  { key: "Std Dev (daily)",          label: "Daily σ",        digits: 2, color: "neutral" },
+  { key: "Skewness",                 label: "Skewness",       digits: 2, color: "neutral" },
+  { key: "Kurtosis",                 label: "Kurtosis",       digits: 2, color: "neutral" },
+
+  // Distribution
+  { key: "Avg Win (pts)",            label: "Avg Win",        digits: 2, suffix: " pts", color: "pos" },
+  { key: "Avg Loss (pts)",           label: "Avg Loss",       digits: 2, suffix: " pts", color: "neg" },
+  { key: "Max Win (pts)",            label: "Max Win",        digits: 2, suffix: " pts", color: "pos" },
+  { key: "Max Loss (pts)",           label: "Max Loss",       digits: 2, suffix: " pts", color: "neg" },
+  { key: "Best Month (pts)",         label: "Best Month",     digits: 2, suffix: " pts", color: "pos" },
+  { key: "Worst Month (pts)",        label: "Worst Month",    digits: 2, suffix: " pts", color: "neg" },
+
+  // Streaks
+  { key: "Max Win Streak",           label: "Win Streak",     digits: 0, suffix: "d", color: "pos" },
+  { key: "Max Loss Streak",          label: "Loss Streak",    digits: 0, suffix: "d", color: "neg" },
+];
+
+function fmt(
+  v: number | string | null | undefined,
+  digits = 2,
+  suffix = "",
+  signed = false,
+): string {
+  if (v === null || v === undefined) return "—";
   if (typeof v === "string") return v;
-  if (Number.isInteger(v)) return v.toLocaleString();
-  return v.toLocaleString(undefined, { maximumFractionDigits: 3 });
+  if (Number.isNaN(v)) return "—";
+  const s = v.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+  return (signed && v > 0 ? "+" : "") + s + suffix;
 }
 
-function valueColor(name: string, v: number | string): string {
-  if (typeof v !== "number") return "text-zinc-100";
-  if (name.includes("Loss") || name === "Max Drawdown (pts)") {
-    return v < 0 ? "text-red-400" : "text-zinc-100";
-  }
-  if (
-    name.includes("PnL") ||
-    name.includes("Return") ||
-    name.includes("Profit") ||
-    name.includes("Win")
-  ) {
-    return v > 0 ? "text-emerald-400" : v < 0 ? "text-red-400" : "text-zinc-100";
-  }
-  return "text-zinc-100";
+function resolveColor(spec: KpiSpec, v: number | string | undefined): string | undefined {
+  if (spec.color === "pos") return "var(--pos)";
+  if (spec.color === "neg") return "var(--neg)";
+  if (spec.color === "neutral") return undefined;
+  if (typeof v !== "number" || Number.isNaN(v)) return undefined;
+  if (v > 0) return "var(--pos)";
+  if (v < 0) return "var(--neg)";
+  return undefined;
 }
 
-export default function MetricsGrid() {
-  const { data, loading } = useFetch<Metric[]>("/api/metrics");
+export default function MetricsGrid({ apiUrl = "/api/metrics" }: { apiUrl?: string }) {
+  const { data, loading } = useFetch<Metric[]>(apiUrl);
+
+  const lookup = useMemo(() => {
+    const m = new Map<string, number | string>();
+    if (data) for (const r of data) m.set(r.Metric, r.Value);
+    return m;
+  }, [data]);
 
   if (loading || !data) {
     return (
-      <div className="animate-pulse h-48 bg-zinc-800/50 rounded-lg" />
+      <div
+        className="rounded-[2px] border border-rule"
+        style={{ background: "var(--panel)", height: 260 }}
+      />
     );
   }
 
-  const lookup = new Map(data.map((m) => [m.Metric, m.Value]));
-
   return (
-    <div className="space-y-6">
-      {Object.entries(GROUPS).map(([group, keys]) => (
-        <div key={group}>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">
-            {group}
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-            {keys.map((key) => {
-              const val = lookup.get(key);
-              if (val === undefined) return null;
-              return (
-                <div
-                  key={key}
-                  className="bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-4 py-3"
-                >
-                  <div className="text-[11px] text-zinc-500 truncate">
-                    {key}
-                  </div>
-                  <div
-                    className={`text-lg font-mono font-semibold mt-0.5 ${valueColor(key, val)}`}
-                  >
-                    {formatValue(val)}
-                  </div>
-                </div>
-              );
-            })}
+    <div className="kpis">
+      {ITEMS.map((spec) => {
+        const raw = lookup.get(spec.key);
+        const color = resolveColor(spec, raw);
+        return (
+          <div className="kpi" key={spec.key}>
+            <div className="label" title={spec.key}>{spec.label}</div>
+            <div className="value" style={color ? { color } : undefined}>
+              {fmt(raw, spec.digits ?? 2, spec.suffix ?? "", spec.signed ?? false)}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

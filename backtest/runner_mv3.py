@@ -257,9 +257,7 @@ def main():
         return
 
     print(f"\nTotal trades: {len(trades_df)}")
-    print(f"Total PnL (pts): {trades_df['pnl'].sum():.2f}")
-    if "pnl_rupees" in trades_df.columns:
-        print(f"Total PnL (INR): {trades_df['pnl_rupees'].sum():.2f}")
+    print(f"Total PnL (premium): {trades_df['pnl'].sum():.2f}")
 
     # Per-set breakdown
     for side in trades_df["set"].unique():

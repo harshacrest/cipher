@@ -30,9 +30,7 @@ export default function TradesTable({ onDateSelect }: TradesTableProps) {
   }, [data, sortKey, sortAsc]);
 
   if (loading || !data) {
-    return (
-      <div className="animate-pulse h-64 bg-zinc-800/50 rounded-lg" />
-    );
+    return <div className="panel"><div className="muted" style={{ padding: 20 }}>Loading…</div></div>;
   }
 
   const displayed = showAll ? sorted : sorted.slice(0, 50);
@@ -63,75 +61,84 @@ export default function TradesTable({ onDateSelect }: TradesTableProps) {
   ];
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-zinc-400">
-          All Trades ({data.length})
-        </h2>
+    <div className="panel">
+      <div className="panel-head">
+        <h2>All Trades ({data.length})</h2>
         {!showAll && data.length > 50 && (
           <button
             onClick={() => setShowAll(true)}
-            className="text-xs text-blue-400 hover:text-blue-300"
+            className="subtab"
+            style={{ margin: 0 }}
           >
-            Show all {data.length} trades
+            Show all {data.length}
           </button>
         )}
       </div>
-      <div className="overflow-auto max-h-[500px] rounded-lg border border-zinc-700/50">
-        <table className="w-full text-xs font-mono">
-          <thead className="bg-zinc-800/80 sticky top-0">
-            <tr>
-              {cols.map((col) => (
-                <th
-                  key={col.key}
-                  onClick={() => handleSort(col.key)}
-                  className="px-3 py-2 text-left text-zinc-500 font-medium cursor-pointer hover:text-zinc-300 select-none whitespace-nowrap"
-                >
-                  {col.label}
-                  {sortKey === col.key && (
-                    <span className="ml-1">{sortAsc ? "▲" : "▼"}</span>
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {displayed.map((trade, i) => (
-              <tr
-                key={trade.date}
-                onClick={() => onDateSelect?.(trade.date)}
-                className="border-t border-zinc-800 hover:bg-zinc-800/60 cursor-pointer transition-colors"
-              >
-                {cols.map((col) => {
-                  const raw = trade[col.key];
-                  let display: string;
-                  if (raw == null) {
-                    display = "-";
-                  } else if (col.fmt && typeof raw === "number") {
-                    display = col.fmt(raw);
-                  } else {
-                    display = String(raw);
-                  }
-
-                  const isPnl = col.key === "pnl" || col.key === "pnl_pct" || col.key === "ce_pnl" || col.key === "pe_pnl";
-                  const isExit = col.key === "ce_exit_reason" || col.key === "pe_exit_reason";
-                  let color = "text-zinc-300";
-                  if (isPnl) {
-                    color = typeof raw === "number" && raw >= 0 ? "text-emerald-400" : "text-red-400";
-                  } else if (isExit) {
-                    color = raw === "SL" ? "text-red-400" : "text-amber-400";
-                  }
-
-                  return (
-                    <td key={col.key} className={`px-3 py-1.5 ${color} whitespace-nowrap`}>
-                      {display}
-                    </td>
-                  );
-                })}
+      <div className="panel-body tight">
+        <div className="table-wrap" style={{ maxHeight: 520 }}>
+          <table className="data">
+            <thead>
+              <tr>
+                {cols.map((col) => (
+                  <th key={col.key} onClick={() => handleSort(col.key)}>
+                    {col.label}
+                    {sortKey === col.key && (
+                      <span style={{ marginLeft: 4, color: "var(--accent)" }}>
+                        {sortAsc ? "▲" : "▼"}
+                      </span>
+                    )}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {displayed.map((trade) => (
+                <tr
+                  key={trade.date}
+                  onClick={() => onDateSelect?.(trade.date)}
+                  className="clickable"
+                >
+                  {cols.map((col) => {
+                    const raw = trade[col.key];
+                    let display: string;
+                    if (raw == null) {
+                      display = "—";
+                    } else if (col.fmt && typeof raw === "number") {
+                      display = col.fmt(raw);
+                    } else {
+                      display = String(raw);
+                    }
+
+                    const isPnl =
+                      col.key === "pnl" ||
+                      col.key === "pnl_pct" ||
+                      col.key === "ce_pnl" ||
+                      col.key === "pe_pnl";
+                    const isExit =
+                      col.key === "ce_exit_reason" || col.key === "pe_exit_reason";
+
+                    let cls: string | undefined;
+                    let inner: React.ReactNode = display;
+
+                    if (isPnl && typeof raw === "number") {
+                      cls = raw >= 0 ? "num-pos" : "num-neg";
+                    } else if (isExit) {
+                      const pillCls =
+                        raw === "SL" ? "pill neg" : raw === "EOD" ? "pill" : "pill warn";
+                      inner = <span className={pillCls}>{display}</span>;
+                    }
+
+                    return (
+                      <td key={col.key} className={cls}>
+                        {inner}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

@@ -6,13 +6,15 @@ import { useFetch } from "@/hooks/use-fetch";
 interface DatePickerProps {
   selectedDate: string;
   onDateChange: (date: string) => void;
+  apiUrl?: string;
 }
 
 export default function DatePicker({
   selectedDate,
   onDateChange,
+  apiUrl = "/api/available-dates",
 }: DatePickerProps) {
-  const { data: dates } = useFetch<string[]>("/api/available-dates");
+  const { data: dates } = useFetch<string[]>(apiUrl);
   const [dateSet, setDateSet] = useState<Set<string>>(new Set());
 
   useEffect(() => {

@@ -33,7 +33,7 @@ class DayHighSpotSellConfig(StrategyConfig):
     pullback_pct: float = 5.0
     sl_pct_above_high: float = 5.0
     strike_step: int = 50
-    lot_size: int = 25
+    lot_size: int = 1
     num_lots: int = 1
     underlying: str = "NIFTY"
     venue: str = "NSE"

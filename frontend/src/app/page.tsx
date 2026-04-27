@@ -1,81 +1,65 @@
 "use client";
 
 import { useState } from "react";
-import MetricsGrid from "@/components/MetricsGrid";
-import EquityCurve from "@/components/EquityCurve";
-import IntradayExplorer from "@/components/IntradayExplorer";
-import BreakdownTabs from "@/components/BreakdownTabs";
-import TradesTable from "@/components/TradesTable";
 import LiveDashboard from "@/components/LiveDashboard";
-import DayHighDashboard from "@/components/DayHighDashboard";
+import Documentation from "@/components/Documentation";
+import ResearchDashboard, {
+  strategySubtitle,
+  type Strategy,
+} from "@/components/ResearchDashboard";
 
-type Tab = "backtest" | "day-high" | "live";
+type Tab = "research" | "live" | "docs";
 
 const TAB_LABELS: Record<Tab, string> = {
-  backtest: "Backtest",
-  "day-high": "Day High",
-  live: "Live",
-};
-
-const TAB_SUBTITLES: Record<Tab, string> = {
-  backtest: "OTM1 Strangle Sell",
-  "day-high": "Day High OTM Sell",
-  live: "OTM1 Strangle Sell",
+  research: "Backtesting Research",
+  live:     "Live",
+  docs:     "Documentation",
 };
 
 export default function Home() {
-  const [tab, setTab] = useState<Tab>("backtest");
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("research");
+  const [strategy, setStrategy] = useState<Strategy>("atm");
+
+  const subtitle =
+    tab === "research" ? strategySubtitle(strategy) :
+    tab === "live"     ? "Live OTM1 Strangle Sell" :
+                          "Strategy Documentation";
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <header className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between">
-        <h1 className="text-lg font-semibold tracking-tight">
-          Cipher{" "}
-          <span className="text-zinc-500 font-normal">
-            / {TAB_SUBTITLES[tab]}
+    <div className="shell">
+      <header className="topbar">
+        <h1>
+          Cipher
+          <span className="meta" style={{ marginLeft: 18 }}>
+            / {subtitle}
           </span>
         </h1>
-        <div className="flex gap-1 bg-zinc-800/60 rounded-lg p-0.5">
-          {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                tab === t
-                  ? "bg-zinc-700 text-zinc-100"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              {TAB_LABELS[t]}
-            </button>
-          ))}
-        </div>
+        <div className="meta">BACKTEST · NIFTY 50 · NSE</div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-10">
-        {tab === "backtest" && (
-          <>
-            <section>
-              <MetricsGrid />
-            </section>
-            <section>
-              <EquityCurve />
-            </section>
-            <section>
-              <IntradayExplorer externalDate={selectedDate} />
-            </section>
-            <section>
-              <BreakdownTabs />
-            </section>
-            <section>
-              <TradesTable onDateSelect={setSelectedDate} />
-            </section>
-          </>
+      <nav className="tabs">
+        {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`tab ${tab === t ? "active" : ""}`}
+          >
+            {TAB_LABELS[t]}
+          </button>
+        ))}
+      </nav>
+
+      <main className="content">
+        {tab === "research" && (
+          <ResearchDashboard strategy={strategy} onStrategyChange={setStrategy} />
         )}
-        {tab === "day-high" && <DayHighDashboard />}
         {tab === "live" && <LiveDashboard />}
+        {tab === "docs" && <Documentation />}
       </main>
+
+      <footer className="footer">
+        Cipher · Backtesting Dashboard · NIFTY 50 Index Options · NSE
+      </footer>
     </div>
   );
 }

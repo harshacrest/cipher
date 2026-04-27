@@ -5,10 +5,10 @@ import { createChart, ColorType, LineSeries } from "lightweight-charts";
 import { useFetch } from "@/hooks/use-fetch";
 import type { EquityPoint } from "@/types";
 
-export default function EquityCurve() {
+export default function EquityCurve({ apiUrl = "/api/equity" }: { apiUrl?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
-  const { data } = useFetch<EquityPoint[]>("/api/equity");
+  const { data } = useFetch<EquityPoint[]>(apiUrl);
 
   useEffect(() => {
     if (!containerRef.current || !data || data.length === 0) return;
@@ -17,39 +17,47 @@ export default function EquityCurve() {
 
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 350,
+      height: 340,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#a1a1aa",
-        fontFamily: "var(--font-geist-mono), monospace",
+        textColor: "#b3b6bd",
+        fontFamily: "var(--font-mono)",
       },
       grid: {
         vertLines: { visible: false },
-        horzLines: { color: "#27272a" },
+        horzLines: { color: "#23262c" },
       },
       timeScale: {
         timeVisible: false,
-        borderColor: "#3f3f46",
+        borderColor: "#2a2e35",
       },
       rightPriceScale: {
-        borderColor: "#3f3f46",
+        borderColor: "#2a2e35",
       },
       crosshair: {
-        horzLine: { color: "#71717a", style: 2 },
-        vertLine: { color: "#71717a", style: 2 },
+        horzLine: { color: "#767a82", style: 2 },
+        vertLine: { color: "#767a82", style: 2 },
       },
     });
 
     const series = chart.addSeries(LineSeries, {
-      color: "#22c55e",
+      color: "#d4b06a", // gold line — accent
       lineWidth: 2,
       priceLineVisible: false,
     });
 
-    const chartData = data.map((p) => ({
-      time: Math.floor(new Date(p.date).getTime() / 1000) as import("lightweight-charts").UTCTimestamp,
-      value: p.cumulative_pnl,
-    }));
+    // Deduplicate by date — take last cumulative_pnl per day
+    const byDate = new Map<number, number>();
+    for (const p of data) {
+      const ts = Math.floor(new Date(p.date).getTime() / 1000);
+      byDate.set(ts, p.cumulative_pnl);
+    }
+    const chartData = Array.from(byDate.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([ts, val]) => ({
+        time: ts as import("lightweight-charts").UTCTimestamp,
+        value: val,
+      }));
 
     series.setData(chartData);
     chart.timeScale().fitContent();
@@ -69,15 +77,5 @@ export default function EquityCurve() {
     };
   }, [data]);
 
-  return (
-    <div>
-      <h2 className="text-sm font-semibold text-zinc-400 mb-3">
-        Equity Curve
-      </h2>
-      <div
-        ref={containerRef}
-        className="w-full rounded-lg border border-zinc-700/50 overflow-hidden"
-      />
-    </div>
-  );
+  return <div ref={containerRef} className="w-full" />;
 }

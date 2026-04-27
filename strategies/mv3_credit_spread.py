@@ -14,7 +14,7 @@ Set 2 (CE Credit Spread):
 Exits per set (monitored on bought/hedge leg):
   - 1-min close >= midpoint of hedge leg's 9:15-9:19 range
   - Trailing SL: activates +20pts, trails every 5pts, 2pt stop
-  - PnL <= -2000 (SL) or PnL >= +6000 (target)  [in rupees]
+  - PnL <= -sl (SL) or PnL >= target  [in premium units]
   - Universal exit 15:00
 
 Repairs are DISABLED (per spec).
@@ -63,13 +63,13 @@ class MV3CreditSpreadConfig(StrategyConfig):
     exit_time: str = "15:00:00"
 
     # Risk / trailing
-    lot_size: int = 75
+    lot_size: int = 1
     num_lots: int = 1
     trailing_activation_pts: float = 20.0
     trailing_step_pts: float = 5.0
     trailing_distance_pts: float = 2.0
-    sl_rupees: float = 2000.0
-    target_rupees: float = 6000.0
+    sl_premium: float = 26.67    # SL in premium units (hedge-leg profit baseline)
+    target_premium: float = 80.0  # target in premium units
 
     # General
     strike_step: int = 50
@@ -344,15 +344,15 @@ class MV3CreditSpread(Strategy):
 
         qty = self.cfg.lot_size * self.cfg.num_lots
         profit_pts = hedge_bid - s.hedge_entry_px
-        pnl_rupees = profit_pts * qty
+        pnl_premium = profit_pts * qty
 
         # PnL-based SL
-        if pnl_rupees <= -self.cfg.sl_rupees:
+        if pnl_premium <= -self.cfg.sl_premium:
             self._exit_set(s, "SL_PNL", ts_ns)
             return
 
         # PnL-based target
-        if pnl_rupees >= self.cfg.target_rupees:
+        if pnl_premium >= self.cfg.target_premium:
             self._exit_set(s, "TARGET_PNL", ts_ns)
             return
 
@@ -468,7 +468,7 @@ class MV3CreditSpread(Strategy):
                 "sold_pnl": round(sold_pnl, 2),
                 "hedge_pnl": round(hedge_pnl, 2),
                 "pnl": round(net_pnl, 2),
-                "pnl_rupees": round(net_pnl * qty, 2),
+                "pnl_premium": round(net_pnl * qty, 2),
             })
 
         return results

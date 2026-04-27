@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 DATA_ROOT = Path("/Users/harsha/Desktop/Research/DATA/NSE/NIFTY")
+VIX_DATA_ROOT = Path("/Users/harsha/Desktop/Research/DATA/NSE/VIX")
 
 
 def list_trading_days() -> list[str]:

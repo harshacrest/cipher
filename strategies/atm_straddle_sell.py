@@ -25,7 +25,7 @@ class ATMStraddleSellConfig(StrategyConfig):
     entry_time: str = "09:21:00"
     exit_time: str = "15:00:00"
     strike_step: int = 50
-    lot_size: int = 65
+    lot_size: int = 1
     num_lots: int = 1
     sl_pct: float = 30.0  # SL as % above entry premium for each leg
     underlying: str = "NIFTY"

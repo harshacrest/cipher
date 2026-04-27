@@ -31,22 +31,22 @@ export default function IntradayExplorer({ externalDate }: Props) {
 
   if (!selectedDate) {
     return (
-      <div className="animate-pulse h-[500px] bg-zinc-800/50 rounded-lg" />
+      <div className="panel"><div className="muted" style={{ padding: 20 }}>Loading…</div></div>
     );
   }
 
   return (
-    <div id="intraday-explorer" className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-zinc-400">
-          Intraday Explorer
-        </h2>
+    <div id="intraday-explorer" className="panel">
+      <div className="panel-head">
+        <h2>Intraday Explorer</h2>
         <DatePicker
           selectedDate={selectedDate}
           onDateChange={setSelectedDate}
         />
       </div>
-      <IntradayChart date={selectedDate} />
+      <div className="panel-body">
+        <IntradayChart date={selectedDate} />
+      </div>
     </div>
   );
 }

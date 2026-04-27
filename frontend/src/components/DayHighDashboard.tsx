@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import {
   createChart,
   createSeriesMarkers,
@@ -20,7 +20,8 @@ import type {
   DteRow,
 } from "@/types";
 
-const API = "/api/day-high";
+const ApiContext = createContext<string>("/api/day-high");
+const useApi = () => useContext(ApiContext);
 
 // ─── Metrics Grid ──────────────────────────────────────────────
 
@@ -86,6 +87,7 @@ function valueColor(name: string, v: number | string): string {
 }
 
 function DhMetrics() {
+  const API = useApi();
   const { data, loading } = useFetch<Metric[]>(`${API}/metrics`);
   if (loading || !data)
     return <div className="animate-pulse h-48 bg-zinc-800/50 rounded-lg" />;
@@ -127,6 +129,7 @@ function DhMetrics() {
 // ─── Equity Curve ──────────────────────────────────────────────
 
 function DhEquityCurve() {
+  const API = useApi();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
   const { data } = useFetch<EquityPoint[]>(`${API}/equity`);
@@ -210,6 +213,7 @@ const EXIT_SL_COLOR = "#ef4444";
 const EXIT_EOD_COLOR = "#f59e0b";
 
 function DhIntradayChart({ date }: { date: string }) {
+  const API = useApi();
   const spotRef = useRef<HTMLDivElement>(null);
   const optRef = useRef<HTMLDivElement>(null);
   const spotChartRef = useRef<ReturnType<typeof createChart> | null>(null);
@@ -460,6 +464,7 @@ function DhIntradayChart({ date }: { date: string }) {
 // ─── Intraday Explorer with Date Dropdown ──────────────────────
 
 function DhIntradayExplorer({ externalDate }: { externalDate?: string | null }) {
+  const API = useApi();
   const { data: dates } = useFetch<string[]>(`${API}/available-dates`);
   const [selectedDate, setSelectedDate] = useState<string>("");
 
@@ -521,6 +526,7 @@ function DhTradesTable({
 }: {
   onDateSelect?: (date: string) => void;
 }) {
+  const API = useApi();
   const { data, loading } = useFetch<DayHighTrade[]>(`${API}/trades`);
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortAsc, setSortAsc] = useState(false);
@@ -714,6 +720,7 @@ const BTABS = ["Monthly", "Yearly", "Day of Week", "By DTE"] as const;
 type BTab = (typeof BTABS)[number];
 
 function DhBreakdownTabs() {
+  const API = useApi();
   const [active, setActive] = useState<BTab>("Monthly");
   const { data: monthly } = useFetch<MonthlyRow[]>(`${API}/monthly`);
   const { data: yearly } = useFetch<YearlyRow[]>(`${API}/yearly`);
@@ -781,6 +788,7 @@ function DhBreakdownTabs() {
 // ─── PnL Distribution Histogram (frequency buckets) ──────────
 
 function DhPnlHistogram() {
+  const API = useApi();
   const { data } = useFetch<DayHighTrade[]>(`${API}/trades`);
 
   const { buckets, stats } = useMemo(() => {
@@ -930,29 +938,19 @@ function DhPnlHistogram() {
 
 // ─── Main Dashboard ────────────────────────────────────────────
 
-export default function DayHighDashboard() {
+// Imported lazily below to avoid a circular-import with StrategyDashboard.
+import StrategyDashboard from "./StrategyDashboard";
+
+export default function DayHighDashboard({ api = "/api/day-high" }: { api?: string } = {}) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   return (
-    <div className="space-y-10">
-      <section>
-        <DhMetrics />
-      </section>
-      <section>
-        <DhEquityCurve />
-      </section>
-      <section>
-        <DhIntradayExplorer externalDate={selectedDate} />
-      </section>
-      <section>
-        <DhBreakdownTabs />
-      </section>
-      <section>
-        <DhPnlHistogram />
-      </section>
-      <section>
-        <DhTradesTable onDateSelect={setSelectedDate} />
-      </section>
-    </div>
+    <ApiContext.Provider value={api}>
+      <StrategyDashboard
+        apiBase={api}
+        renderTransactions={() => <DhTradesTable onDateSelect={setSelectedDate} />}
+        renderIntraday={() => <DhIntradayExplorer externalDate={selectedDate} />}
+      />
+    </ApiContext.Provider>
   );
 }

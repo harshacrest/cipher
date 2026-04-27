@@ -61,21 +61,25 @@ def compute_metrics(trades: pd.DataFrame) -> dict:
         if duration > max_dd_duration:
             max_dd_duration = duration
 
+    # Aggregate to DAILY PnL for risk metrics (multiple trades/day must be summed)
+    daily_pnl = trades.groupby(trades["date"].dt.date)["pnl"].sum()
+    n_days = len(daily_pnl)
+
     # Calmar ratio (annualized return / max drawdown)
-    n_years = n_trades / 252
+    n_years = n_days / 252
     annualized_return = total_pnl / n_years if n_years > 0 else 0
     calmar = annualized_return / abs(max_drawdown) if max_drawdown != 0 else float("inf")
 
-    # Sharpe ratio (daily, annualized)
-    if pnl.std() > 0:
-        sharpe = (pnl.mean() / pnl.std()) * np.sqrt(252)
+    # Sharpe ratio (daily PnL, annualized)
+    if daily_pnl.std() > 0:
+        sharpe = (daily_pnl.mean() / daily_pnl.std()) * np.sqrt(252)
     else:
         sharpe = 0
 
-    # Sortino ratio (downside deviation)
-    downside = pnl[pnl < 0]
-    if len(downside) > 0 and downside.std() > 0:
-        sortino = (pnl.mean() / downside.std()) * np.sqrt(252)
+    # Sortino ratio (daily downside deviation, annualized)
+    daily_downside = daily_pnl[daily_pnl < 0]
+    if len(daily_downside) > 0 and daily_downside.std() > 0:
+        sortino = (daily_pnl.mean() / daily_downside.std()) * np.sqrt(252)
     else:
         sortino = 0
 
@@ -127,9 +131,9 @@ def compute_metrics(trades: pd.DataFrame) -> dict:
         "Profitable Months (%)": round(pct_profitable_months, 2),
         "Max Win Streak": max_win_streak,
         "Max Loss Streak": abs(max_loss_streak),
-        "Std Dev (daily)": round(pnl.std(), 2),
-        "Skewness": round(pnl.skew(), 3),
-        "Kurtosis": round(pnl.kurtosis(), 3),
+        "Std Dev (daily)": round(daily_pnl.std(), 2),
+        "Skewness": round(daily_pnl.skew(), 3),
+        "Kurtosis": round(daily_pnl.kurtosis(), 3),
     }
 
 
@@ -165,7 +169,7 @@ def generate_report(strategy_name: str, trades: pd.DataFrame):
         ).round(2).reset_index()
         monthly.to_excel(writer, sheet_name="Monthly", index=False)
 
-        # Yearly PnL
+        # Yearly PnL (Sharpe computed on daily-aggregated PnL per year)
         yearly = trades_m.groupby("year").agg(
             trades=("pnl", "count"),
             total_pnl=("pnl", "sum"),
@@ -173,8 +177,17 @@ def generate_report(strategy_name: str, trades: pd.DataFrame):
             win_rate=("pnl", lambda x: (x > 0).sum() / len(x) * 100),
             max_win=("pnl", "max"),
             max_loss=("pnl", "min"),
-            sharpe=("pnl", lambda x: (x.mean() / x.std() * np.sqrt(252)) if x.std() > 0 else 0),
         ).round(2).reset_index()
+        # Compute yearly Sharpe from daily PnL
+        trades_m["date_only"] = trades_m["date"].dt.date
+        yearly_sharpe = []
+        for yr in yearly["year"]:
+            yr_daily = trades_m[trades_m["year"] == yr].groupby("date_only")["pnl"].sum()
+            if yr_daily.std() > 0:
+                yearly_sharpe.append(round((yr_daily.mean() / yr_daily.std()) * np.sqrt(252), 2))
+            else:
+                yearly_sharpe.append(0.0)
+        yearly["sharpe"] = yearly_sharpe
         yearly.to_excel(writer, sheet_name="Yearly", index=False)
 
         # Day-of-week analysis

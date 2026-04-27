@@ -1,0 +1,47 @@
+Running NautilusTrader backtest: multi_leg_dm
+  Date range: 2025-12-01 to 2026-01-31
+Backtesting multi_leg_dm:   0%|          | 0/42 [00:00<?, ?it/s]Backtesting multi_leg_dm:   2%|▏         | 1/42 [00:11<07:36, 11.13s/it]Backtesting multi_leg_dm:   5%|▍         | 2/42 [00:23<07:42, 11.57s/it]Backtesting multi_leg_dm:   7%|▋         | 3/42 [00:23<04:07,  6.34s/it]Backtesting multi_leg_dm:  10%|▉         | 4/42 [00:34<05:09,  8.15s/it]Backtesting multi_leg_dm:  12%|█▏        | 5/42 [00:45<05:42,  9.24s/it]Backtesting multi_leg_dm:  14%|█▍        | 6/42 [00:56<05:53,  9.83s/it]Backtesting multi_leg_dm:  17%|█▋        | 7/42 [01:06<05:47,  9.92s/it]Backtesting multi_leg_dm:  19%|█▉        | 8/42 [01:17<05:50, 10.30s/it]Backtesting multi_leg_dm:  21%|██▏       | 9/42 [01:28<05:42, 10.39s/it]Backtesting multi_leg_dm:  24%|██▍       | 10/42 [01:38<05:32, 10.40s/it]Backtesting multi_leg_dm:  26%|██▌       | 11/42 [01:47<05:10, 10.00s/it]Backtesting multi_leg_dm:  29%|██▊       | 12/42 [01:57<04:55,  9.86s/it]Backtesting multi_leg_dm:  31%|███       | 13/42 [02:07<04:47,  9.92s/it]Backtesting multi_leg_dm:  33%|███▎      | 14/42 [02:18<04:50, 10.37s/it]Backtesting multi_leg_dm:  36%|███▌      | 15/42 [02:28<04:35, 10.20s/it]Backtesting multi_leg_dm:  38%|███▊      | 16/42 [02:38<04:21, 10.06s/it]Backtesting multi_leg_dm:  40%|████      | 17/42 [02:47<04:05,  9.83s/it]Backtesting multi_leg_dm:  43%|████▎     | 18/42 [02:56<03:51,  9.67s/it]Backtesting multi_leg_dm:  45%|████▌     | 19/42 [03:06<03:41,  9.62s/it]Backtesting multi_leg_dm:  48%|████▊     | 20/42 [03:16<03:37,  9.86s/it]Backtesting multi_leg_dm:  50%|█████     | 21/42 [03:26<03:24,  9.73s/it]Backtesting multi_leg_dm:  52%|█████▏    | 22/42 [03:35<03:11,  9.60s/it]Backtesting multi_leg_dm:  55%|█████▍    | 23/42 [03:43<02:55,  9.24s/it]Backtesting multi_leg_dm:  57%|█████▋    | 24/42 [03:53<02:46,  9.26s/it]Backtesting multi_leg_dm:  60%|█████▉    | 25/42 [04:03<02:41,  9.48s/it]Backtesting multi_leg_dm:  62%|██████▏   | 26/42 [04:16<02:49, 10.57s/it]Backtesting multi_leg_dm:  64%|██████▍   | 27/42 [04:27<02:44, 10.96s/it]Backtesting multi_leg_dm:  67%|██████▋   | 28/42 [04:41<02:43, 11.69s/it]Backtesting multi_leg_dm:  69%|██████▉   | 29/42 [04:53<02:34, 11.90s/it]Backtesting multi_leg_dm:  71%|███████▏  | 30/42 [05:05<02:21, 11.82s/it]Backtesting multi_leg_dm:  74%|███████▍  | 31/42 [05:13<01:58, 10.76s/it]Backtesting multi_leg_dm:  76%|███████▌  | 32/42 [05:21<01:39,  9.94s/it]Backtesting multi_leg_dm:  79%|███████▊  | 33/42 [05:29<01:24,  9.35s/it]Backtesting multi_leg_dm:  81%|████████  | 34/42 [05:37<01:11,  9.00s/it]Backtesting multi_leg_dm:  83%|████████▎ | 35/42 [05:46<01:03,  9.02s/it]Backtesting multi_leg_dm:  86%|████████▌ | 36/42 [05:56<00:54,  9.04s/it]Backtesting multi_leg_dm:  88%|████████▊ | 37/42 [06:04<00:43,  8.73s/it]Backtesting multi_leg_dm:  90%|█████████ | 38/42 [06:12<00:34,  8.52s/it]Backtesting multi_leg_dm:  93%|█████████▎| 39/42 [06:20<00:25,  8.54s/it]Backtesting multi_leg_dm:  95%|█████████▌| 40/42 [06:28<00:16,  8.30s/it]Backtesting multi_leg_dm:  98%|█████████▊| 41/42 [06:36<00:08,  8.23s/it]Backtesting multi_leg_dm: 100%|██████████| 42/42 [06:44<00:00,  8.09s/it]Backtesting multi_leg_dm: 100%|██████████| 42/42 [06:44<00:00,  9.62s/it]
+
+Total trades: 75 across 41 days
+Trades per day avg: 1.83
+Total PnL (premium): 932.20
+
+Exit reason breakdown:
+exit_reason
+SPOT_BAND    43
+EOD          32
+
+==================================================
+  BACKTEST RESULTS: multi_leg_dm
+==================================================
+  Total PnL (pts)                932.2
+  Total Trades                   75
+  Winners                        46
+  Losers                         29
+  Flat                           0
+  Win Rate (%)                   61.33
+  Avg PnL (pts)                  12.43
+  Avg Win (pts)                  77.43
+  Avg Loss (pts)                 -90.68
+  Max Win (pts)                  396.65
+  Max Loss (pts)                 -256.65
+  Profit Factor                  1.355
+  Risk-Reward Ratio              0.854
+  Expectancy (pts)               12.43
+  Sharpe Ratio (ann.)            2.563
+  Sortino Ratio (ann.)           3.304
+  Calmar Ratio                   9.887
+  Max Drawdown (pts)             -579.5
+  Max DD Duration (days)         30
+  Annualized Return (pts)        5729.62
+  Best Month (pts)               854.65
+  Worst Month (pts)              77.55
+  Profitable Months (%)          100.0
+  Max Win Streak                 14
+  Max Loss Streak                4
+  Std Dev (daily)                140.81
+  Skewness                       -0.573
+  Kurtosis                       1.738
+==================================================
+
+Output saved to: output/multi_leg_dm/

@@ -8,6 +8,7 @@ plots trade-by-trade cumulative PnL.
 
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -16,7 +17,9 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-STRATEGY = "multi_leg_dm"
+# Strategy name (output folder) is overridable via env var so the same script
+# serves both v1 (multi_leg_dm) and v2 (multi_leg_dm_v2).
+STRATEGY = os.environ.get("MULTILEGDM_STRATEGY", "multi_leg_dm")
 OUTPUT_DIR = PROJECT_ROOT / "output" / STRATEGY
 API_DIR = OUTPUT_DIR / "api"
 

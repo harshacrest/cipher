@@ -6,6 +6,7 @@ const VERSION_DIRS: Record<string, string | undefined> = {
   v4: process.env.DAY_HIGH_V4_DATA_DIR,
   v5: process.env.DAY_HIGH_V5_DATA_DIR,
   v6: process.env.DAY_HIGH_V6_DATA_DIR,
+  v7: process.env.DAY_HIGH_V7_DATA_DIR,
 };
 
 export function readVersionedDayHighFile(version: string, filename: string): unknown {

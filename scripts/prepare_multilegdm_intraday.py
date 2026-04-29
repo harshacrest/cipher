@@ -35,7 +35,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from lib.data_utils import get_nearest_expiry_file, load_spot  # noqa: E402
 
-STRATEGY = "multi_leg_dm"
+import os as _os
+# Strategy name (output folder) is overridable via env var so the same script
+# serves both v1 (multi_leg_dm) and v2 (multi_leg_dm_v2).
+STRATEGY = _os.environ.get("MULTILEGDM_STRATEGY", "multi_leg_dm")
 OUTPUT_DIR = PROJECT_ROOT / "output" / STRATEGY
 API_DIR = OUTPUT_DIR / "api"
 INTRADAY_DIR = API_DIR / "intraday"

@@ -21,7 +21,7 @@ import {
 } from "lightweight-charts";
 import { useFetch } from "@/hooks/use-fetch";
 
-const API_BASE = "/api/multilegdm";
+const DEFAULT_API_BASE = "/api/multilegdm";
 
 // ─── types ───────────────────────────────────────────────────────────────
 
@@ -118,11 +118,11 @@ interface PathDistribution {
 
 // ─── component ───────────────────────────────────────────────────────────
 
-export default function MTMAnalysisPanel() {
-  const { data: ohlc } = useFetch<OhlcRow[]>(`${API_BASE}/mtm-ohlc`);
-  const { data: stats } = useFetch<MtmStats>(`${API_BASE}/mtm-stats`);
-  const { data: dist } = useFetch<MtmDistribution>(`${API_BASE}/mtm-distribution`);
-  const { data: pathDist } = useFetch<PathDistribution>(`${API_BASE}/path-distribution`);
+export default function MTMAnalysisPanel({ apiBase = DEFAULT_API_BASE }: { apiBase?: string } = {}) {
+  const { data: ohlc } = useFetch<OhlcRow[]>(`${apiBase}/mtm-ohlc`);
+  const { data: stats } = useFetch<MtmStats>(`${apiBase}/mtm-stats`);
+  const { data: dist } = useFetch<MtmDistribution>(`${apiBase}/mtm-distribution`);
+  const { data: pathDist } = useFetch<PathDistribution>(`${apiBase}/path-distribution`);
 
   if (!ohlc || !stats || !dist) {
     return (

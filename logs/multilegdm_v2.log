@@ -1,0 +1,28 @@
+Reading 1404 intraday files...
+
+Wrote 1404 day OHLC records.
+  Close: mean=   51.5  std= 143.2  p5= -167.3  p95=  270.3  win%=73.0
+  High : mean=  114.6  p95=  321.7  max=1009.3
+  Low  : mean=  -81.1  p5= -266.9   min=-577.9
+  Intraday DD (low-close): mean=-132.6  p5=-335.2  min=-1001.0
+  Path shapes: red→green=985  green→red=364  all-red=15  all-green=40
+
+  Recovery days (red→green) — depth of intraday red:
+    [   0,   25)  n= 395  ( 40.1%)  mean_close= +113.7
+    [  25,   50)  n= 246  ( 25.0%)  mean_close=  +97.8
+    [  50,   75)  n= 123  ( 12.5%)  mean_close=  +96.6
+    [  75,  100)  n=  92  (  9.3%)  mean_close=  +87.0
+    [ 100,  150)  n=  81  (  8.2%)  mean_close= +122.2
+    [ 150,  200)  n=  29  (  2.9%)  mean_close= +111.0
+    [ 200,  300)  n=  15  (  1.5%)  mean_close=  +88.9
+    [ 300,  500)  n=   4  (  0.4%)  mean_close= +151.2
+
+  Giveaway days (green→red) — peak of intraday green:
+    [   0,   25)  n= 124  ( 34.1%)  mean_close= -104.7
+    [  25,   50)  n= 100  ( 27.5%)  mean_close=  -74.4
+    [  50,   75)  n=  55  ( 15.1%)  mean_close=  -90.4
+    [  75,  100)  n=  39  ( 10.7%)  mean_close= -111.2
+    [ 100,  150)  n=  30  (  8.2%)  mean_close=  -77.1
+    [ 150,  200)  n=   7  (  1.9%)  mean_close=  -86.8
+    [ 200,  300)  n=   5  (  1.4%)  mean_close= -207.6
+    [ 300,  500)  n=   4  (  1.1%)  mean_close= -326.1

@@ -31,12 +31,30 @@ import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-INTRADAY_DIR = PROJECT_ROOT / "output" / "multi_leg_dm" / "api" / "intraday"
-API_DIR = PROJECT_ROOT / "output" / "multi_leg_dm" / "api"
+# Strategy name (output folder) is overridable via env var so the same script
+# serves both v1 (multi_leg_dm) and v2 (multi_leg_dm_v2).
+import os as _os
+_STRATEGY = _os.environ.get("MULTILEGDM_STRATEGY", "multi_leg_dm")
+INTRADAY_DIR = PROJECT_ROOT / "output" / _STRATEGY / "api" / "intraday"
+API_DIR = PROJECT_ROOT / "output" / _STRATEGY / "api"
 
 
 def compute_day_mtm(d: dict) -> dict | None:
-    """Reconstruct intraday MTM curve for one day; return OHLC summary."""
+    """Reconstruct intraday MTM curve for one day; return OHLC summary.
+
+    Hybrid economics (deliberate):
+      - Intraday HIGH / LOW use MID-based unrealized — that's the only
+        intra-trade signal we have (the strategy never publishes fill-side
+        marks intraday). Mids are unbiased and trace the running position
+        value smoothly.
+      - CLOSE uses the strategy's authoritative `pnl_premium` (fill-based
+        realized) — bid for entry SELL, ask for exit BUY. This makes the
+        Close column match `metrics.json`/`trades.json` exactly.
+
+    Spread cost is folded into Close at trade-close points but never
+    appears in the intraday curve — a small cosmetic discontinuity at
+    each trade's exit equal to that trade's round-trip spread.
+    """
     trades = d.get("trades", [])
     if not trades:
         return None
@@ -47,16 +65,20 @@ def compute_day_mtm(d: dict) -> dict | None:
     open_mtm = 0.0
     high_mtm = 0.0
     low_mtm = 0.0
-    closed_pnl = 0.0  # cumulative realized PnL
+    closed_pnl = 0.0          # cumulative MID-based PnL (drives high/low only)
+    closed_pnl_real = 0.0     # cumulative FILL-based realized (authoritative close)
 
     for t in trades:
         entry_p = float(t["premium_at_entry"])
         exit_p = float(t["premium_at_exit"])
+        # Use the strategy-reported realized PnL when available; falls back
+        # to mid-mid for legacy intraday JSONs that lack pnl_premium.
+        real_pnl = (
+            float(t["pnl_premium"]) if t.get("pnl_premium") is not None
+            else entry_p - exit_p
+        )
 
-        # During this trade: mtm(s) = closed_pnl + (entry_p - current_p)
-        # The intra-trade min/max:
-        #   max_mtm = closed_pnl + entry_p - min_premium_during_trade
-        #   min_mtm = closed_pnl + entry_p - max_premium_during_trade
+        # During this trade: mtm(s) = closed_pnl + (entry_p - current_p)  [MID basis]
         ps = t.get("premium_series") or []
         if ps:
             prices = [float(p[1]) for p in ps]
@@ -72,18 +94,21 @@ def compute_day_mtm(d: dict) -> dict | None:
         high_mtm = max(high_mtm, in_trade_max)
         low_mtm = min(low_mtm, in_trade_min)
 
-        # Trade closes — realize PnL
-        closed_pnl += entry_p - exit_p
-        # Touch the close-of-trade point on the curve
-        high_mtm = max(high_mtm, closed_pnl)
-        low_mtm = min(low_mtm, closed_pnl)
+        # Trade closes — advance both cumulators
+        closed_pnl += entry_p - exit_p          # mid basis (continuity for next trade's curve)
+        closed_pnl_real += real_pnl             # fill basis (the truth at close)
+
+        # Touch the close-of-trade point on the curve using the real realized value
+        # so high/low correctly reflect any post-realization snap.
+        high_mtm = max(high_mtm, closed_pnl_real)
+        low_mtm = min(low_mtm, closed_pnl_real)
 
     return {
         "date": d["date"],
         "open": round(open_mtm, 2),
         "high": round(high_mtm, 2),
         "low": round(low_mtm, 2),
-        "close": round(closed_pnl, 2),
+        "close": round(closed_pnl_real, 2),     # authoritative fill-based PnL
         "range": round(high_mtm - low_mtm, 2),
         "n_trades": len(trades),
         "dte": d.get("dte"),
@@ -136,8 +161,20 @@ def main() -> None:
     # ---------------- mtm_ohlc.json ----------------
     ohlc = df.copy()
     ohlc["date"] = ohlc["date"].dt.strftime("%Y-%m-%d")
+    # Sanitize NaN/inf so output is strict-JSON-compliant (otherwise pandas
+    # leaves NaN in records and json.dump writes the literal `NaN`, which
+    # JS JSON.parse rejects → 500 from the route handler).
+    records = []
+    for rec in ohlc.to_dict("records"):
+        clean = {}
+        for k, v in rec.items():
+            if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+                clean[k] = None
+            else:
+                clean[k] = v
+        records.append(clean)
     with open(API_DIR / "mtm_ohlc.json", "w") as f:
-        json.dump(ohlc.to_dict("records"), f)
+        json.dump(records, f, allow_nan=False)
 
     # ---------------- mtm_stats.json ---------------
     # Intraday drawdown = how far below close the trough went

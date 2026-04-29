@@ -13,7 +13,7 @@ import StrategyDashboard from "./StrategyDashboard";
 import DatePicker from "./DatePicker";
 import MTMAnalysisPanel from "./MTMAnalysisPanel";
 
-const API_BASE = "/api/multilegdm";
+const DEFAULT_API_BASE = "/api/multilegdm";
 
 interface MultiLegTrade {
   date: string;
@@ -71,23 +71,23 @@ interface IntradayPayload {
 
 type SortKey = keyof MultiLegTrade;
 
-export default function MultiLegDMDashboard() {
+export default function MultiLegDMDashboard({ apiBase = DEFAULT_API_BASE }: { apiBase?: string } = {}) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   return (
     <StrategyDashboard
-      apiBase={API_BASE}
+      apiBase={apiBase}
       renderTransactions={() => (
-        <MultiLegTradesTable onDateSelect={setSelectedDate} />
+        <MultiLegTradesTable apiBase={apiBase} onDateSelect={setSelectedDate} />
       )}
       renderIntraday={() => (
-        <IntradayPanel externalDate={selectedDate} onDateChange={setSelectedDate} />
+        <IntradayPanel apiBase={apiBase} externalDate={selectedDate} onDateChange={setSelectedDate} />
       )}
       renderCharts={() => (
-        <ChartsPanel externalDate={selectedDate} onDateChange={setSelectedDate} />
+        <ChartsPanel apiBase={apiBase} externalDate={selectedDate} onDateChange={setSelectedDate} />
       )}
       chartsLabel="Charts"
-      renderMTM={() => <MTMAnalysisPanel />}
+      renderMTM={() => <MTMAnalysisPanel apiBase={apiBase} />}
       mtmLabel="MTM"
     />
   );
@@ -95,8 +95,8 @@ export default function MultiLegDMDashboard() {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-function useLatestDate(externalDate: string | null | undefined) {
-  const { data: dates } = useFetch<string[]>(`${API_BASE}/available-dates`);
+function useLatestDate(apiBase: string, externalDate: string | null | undefined) {
+  const { data: dates } = useFetch<string[]>(`${apiBase}/available-dates`);
   const [selected, setSelected] = useState<string>("");
 
   useEffect(() => {
@@ -120,23 +120,25 @@ function fmtNum(v: number | null | undefined, digits = 2, sign = false): string 
 // ─── Intraday (day detail) ────────────────────────────────────────────────
 
 function IntradayPanel({
+  apiBase,
   externalDate,
   onDateChange,
 }: {
+  apiBase: string;
   externalDate: string | null;
   onDateChange?: (d: string) => void;
 }) {
-  const { dates, selected, setSelected } = useLatestDate(externalDate);
+  const { dates, selected, setSelected } = useLatestDate(apiBase, externalDate);
 
   const handleDateChange = (d: string) => {
     setSelected(d);
     onDateChange?.(d);
   };
 
-  const { data: exits } = useFetch<ExitReasonRow[]>(`${API_BASE}/exit-reasons`);
+  const { data: exits } = useFetch<ExitReasonRow[]>(`${apiBase}/exit-reasons`);
 
   const { data: day, loading } = useFetch<IntradayPayload>(
-    `${API_BASE}/intraday/${selected || "__none__"}`,
+    `${apiBase}/intraday/${selected || "__none__"}`,
   );
 
   // Day-level aggregates (must be declared before any early return to keep hook order stable)
@@ -174,7 +176,7 @@ function IntradayPanel({
           <DatePicker
             selectedDate={selected}
             onDateChange={handleDateChange}
-            apiUrl={`${API_BASE}/available-dates`}
+            apiUrl={`${apiBase}/available-dates`}
           />
         </div>
         <div className="panel-body tight">
@@ -502,20 +504,22 @@ function ExitReasonsTable({ exits }: { exits: ExitReasonRow[] }) {
 // ─── Charts tab ───────────────────────────────────────────────────────────
 
 function ChartsPanel({
+  apiBase,
   externalDate,
   onDateChange,
 }: {
+  apiBase: string;
   externalDate: string | null;
   onDateChange?: (d: string) => void;
 }) {
-  const { dates, selected, setSelected } = useLatestDate(externalDate);
+  const { dates, selected, setSelected } = useLatestDate(apiBase, externalDate);
   const handle = (d: string) => {
     setSelected(d);
     onDateChange?.(d);
   };
 
   const { data: day, loading } = useFetch<IntradayPayload>(
-    `${API_BASE}/intraday/${selected || "__none__"}`,
+    `${apiBase}/intraday/${selected || "__none__"}`,
   );
 
   if (!selected || !dates) {
@@ -562,7 +566,7 @@ function ChartsPanel({
             <DatePicker
               selectedDate={selected}
               onDateChange={handle}
-              apiUrl={`${API_BASE}/available-dates`}
+              apiUrl={`${apiBase}/available-dates`}
             />
           </div>
         </div>
@@ -753,13 +757,18 @@ function SpotPremiumChart({ data }: { data: IntradayPayload }) {
     }
 
     // ── MTM curve (overlay, points) ───────────────────────────────────────
-    // Reconstruct intraday MTM at each premium tick:
-    //   active trade: closed_pnl + (premium_at_entry - current_premium)
-    //   between trades: flat at closed_pnl
-    // Trades are non-overlapping by design.
+    // Reconstruct intraday MTM at each premium tick. Hybrid economics:
+    //   • Intra-trade points use MID basis: closed + (entry_mid − current_mid)
+    //     (mids are the only intra-trade signal; fills only land at exit)
+    //   • At trade exit, the curve SNAPS to the authoritative fill-based
+    //     realized PnL (`trade.pnl_premium`) — this is the same number shown
+    //     in the trades table and aggregated into headline metrics.
+    // Result: continuous mid-trace within active windows, exact realized
+    // value at every close — same definition as `mtm_ohlc.close`.
     const mtmPoints: { time: UTCTimestamp; value: number }[] = [];
     const sortedTrades = [...data.trades].sort((a, b) => a.entry_ms - b.entry_ms);
-    let closed = 0;
+    let closed = 0;       // fill-based cumulative realized (drives between-trade flats + close snaps)
+    let closedMid = 0;    // mid-based cumulative (drives the intra-trade curve continuity)
     // Anchor at session start so the line begins at 0
     if (data.spot.length > 0) {
       mtmPoints.push({ time: msToUtc(data.spot[0][0]), value: 0 });
@@ -768,17 +777,25 @@ function SpotPremiumChart({ data }: { data: IntradayPayload }) {
       const entryP = trade.premium_at_entry;
       const exitP = trade.premium_at_exit;
       if (entryP == null || !trade.premium_series?.length) continue;
-      // Hold-flat point right before this trade's entry
+      // Hold-flat point right before this trade's entry (use REAL closed running total)
       mtmPoints.push({ time: msToUtc(trade.entry_ms - 1), value: closed });
-      // MTM through the trade window
+      // MTM through the trade window: walk on MID basis but anchored to the
+      // pre-trade fill-based total (so the curve starts where the previous
+      // trade's realized close left off, not where mid-mid would have).
+      const midOffset = closed - closedMid;
       for (const [ms, prem] of trade.premium_series) {
-        mtmPoints.push({ time: msToUtc(ms), value: closed + (entryP - prem) });
+        mtmPoints.push({ time: msToUtc(ms), value: closedMid + (entryP - prem) + midOffset });
       }
-      // Realize at exit
-      if (exitP != null) {
-        closed += entryP - exitP;
-        mtmPoints.push({ time: msToUtc(trade.exit_ms), value: closed });
-      }
+      // Realize at exit: snap to the authoritative fill-based realized value
+      const realPnl =
+        typeof trade.pnl_premium === "number"
+          ? trade.pnl_premium
+          : exitP != null
+            ? entryP - exitP
+            : 0;
+      closed += realPnl;
+      if (exitP != null) closedMid += entryP - exitP;
+      mtmPoints.push({ time: msToUtc(trade.exit_ms), value: closed });
     }
     // Carry final closed PnL flat to end of session
     if (data.spot.length > 0 && mtmPoints.length > 0) {
@@ -845,11 +862,13 @@ function dedupByTime<T extends { time: UTCTimestamp }>(arr: T[]): T[] {
 // ─── Transactions table ───────────────────────────────────────────────────
 
 function MultiLegTradesTable({
+  apiBase,
   onDateSelect,
 }: {
+  apiBase: string;
   onDateSelect?: (date: string) => void;
 }) {
-  const { data, loading } = useFetch<MultiLegTrade[]>(`${API_BASE}/trades`);
+  const { data, loading } = useFetch<MultiLegTrade[]>(`${apiBase}/trades`);
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortAsc, setSortAsc] = useState(false);
   const [showAll, setShowAll] = useState(false);

@@ -22,11 +22,15 @@ type Strategy =
   | "day-high-v4"
   | "day-high-v5"
   | "day-high-v6"
+  | "day-high-v7"
   | "day-high-spot"
   | "day-high-vix"
   | "directional-op"
   | "mv3"
   | "multilegdm"
+  | "multilegdm-v2"
+  | "multilegdm-v3"
+  | "multilegdm-v4"
   | "vwap-sd"
   | "comparison";
 
@@ -44,11 +48,15 @@ const STRATEGIES: StrategyMeta[] = [
   { id: "day-high-v4",    label: "Day High OTM v4", subtitle: "Day High OTM v4 (phantom skip + costs)" },
   { id: "day-high-v5",    label: "Day High OTM v5", subtitle: "Day High OTM v5 (whole-day DH)" },
   { id: "day-high-v6",    label: "Day High OTM v6", subtitle: "Day High OTM v6 (whole-day DH + fresh cross)" },
+  { id: "day-high-v7",    label: "Day High OTM v7", subtitle: "Day High OTM v7 (v6 base + max 3 trades/day)" },
   { id: "day-high-spot",  label: "Day High Spot",   subtitle: "Day High Spot Sell" },
   { id: "day-high-vix",   label: "Day High VIX",    subtitle: "Day High VIX Straddle" },
   { id: "directional-op", label: "Directional OP",  subtitle: "Directional Credit Spread" },
   { id: "mv3",            label: "MV3 Spread",      subtitle: "MV3 v33 Credit Spread" },
   { id: "multilegdm",     label: "MultiLeg DM",     subtitle: "MultiLegDM — 6 strangles ATM+OTM_1..5 with re-entry" },
+  { id: "multilegdm-v2",  label: "MultiLeg DM v2",  subtitle: "MultiLegDM v2 — same structure, tighter SLs (trade −155, daily −550) @ 30s ticks" },
+  { id: "multilegdm-v3",  label: "MultiLeg DM v3",  subtitle: "MultiLegDM v3 — same SLs as v2, finer 5s tick resolution" },
+  { id: "multilegdm-v4",  label: "MultiLeg DM v4",  subtitle: "MultiLegDM v4 — same SLs as v2/v3, native 1s tick resolution" },
   { id: "vwap-sd",        label: "VWAP SD 15-Str",  subtitle: "Aggregate 15-straddle short on VWAP-1SD mean reversion" },
   { id: "comparison",     label: "Comparison",      subtitle: "Side-by-side" },
 ];
@@ -89,7 +97,11 @@ export function ResearchDashboard({ strategy, onStrategyChange }: ResearchDashbo
         {strategy === "day-high-v4" && <DayHighDashboard api="/api/day-high-v4" />}
         {strategy === "day-high-v5" && <DayHighDashboard api="/api/day-high-v5" />}
         {strategy === "day-high-v6" && <DayHighDashboard api="/api/day-high-v6" />}
+        {strategy === "day-high-v7" && <DayHighDashboard api="/api/day-high-v7" />}
         {strategy === "multilegdm" && <MultiLegDMDashboard />}
+        {strategy === "multilegdm-v2" && <MultiLegDMDashboard apiBase="/api/multilegdm-v2" />}
+        {strategy === "multilegdm-v3" && <MultiLegDMDashboard apiBase="/api/multilegdm-v3" />}
+        {strategy === "multilegdm-v4" && <MultiLegDMDashboard apiBase="/api/multilegdm-v4" />}
         {strategy === "vwap-sd" && <VWAPSDDashboard />}
         {strategy === "comparison" && <Comparison />}
 
